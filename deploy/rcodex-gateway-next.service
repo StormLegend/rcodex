@@ -1,0 +1,25 @@
+# 自研网关示例单元（systemd，系统级，非 root 用户运行）。
+# 与官方网关并存时用不同端口（这里 8790），验证没问题后再切换。
+[Unit]
+Description=rCodex Gateway (clean-room, next)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=appuser
+Group=appuser
+WorkingDirectory=/home/appuser/rcodex/gateway
+Environment=HOME=/home/appuser
+Environment=RCODEX_GATEWAY_ENV=/home/appuser/.rcodex/gateway-next.env
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/usr/bin/node /home/appuser/rcodex/gateway/src/cli.mjs service run
+Restart=on-failure
+RestartSec=5
+KillSignal=SIGTERM
+TimeoutStopSec=30
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -1,6 +1,24 @@
 # rCodex Maintained（社区维护版）
 
-一套**维护层**：在不重新分发上游代码的前提下，修复 `@rcodex-lab/gateway` 的若干回归问题，并附带一个按 token 计费的预算闸。
+两件事：
+
+1. **`gateway/` —— 我们自己重写的 rCodex 兼容网关**（clean-room，MIT）。直接驱动
+   `codex app-server`，提供控制台 + HTTP API，不再依赖上游那份闭源产物。
+2. **`patches/` —— 过渡期的维护层**：给还在用官方网关的人用的补丁集，修复若干回归问题；
+   以及 `budget-guard/`（按 token 计费的预算闸）。
+
+> 重写进度见 [docs/ROADMAP.md](docs/ROADMAP.md)，架构说明见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
+> 自研网关当前已跑通：登录（验证码）→ 建会话 → 真实 `codex app-server` 出答案 → SSE 流式回传 → 文件浏览。
+
+```bash
+cd gateway && npm test                      # 10/10 通过（含端到端会话流程）
+RCODEX_SMOKE=1 CODEX_COMMAND=/path/to/rcodex-codex \
+  node test/smoke-live.mjs /tmp/ws "只回复两个字：收到"   # 实弹：需要真实 Codex
+```
+
+## 维护层（补丁 + 预算闸）
+
+在不重新分发上游代码的前提下，修复 `@rcodex-lab/gateway` 的若干回归问题，并附带一个按 token 计费的预算闸。
 
 > 起因：上游 1.4.35/1.4.37 的改动让"老会话继续输入"和"加载旧版会话"都出了问题——已完成消息被截断到 4000 字符、旧版 4001 字符的完成记录会把更长的流式内容覆盖掉、控制台在升级后会缓存旧的模型能力模块、空的 reasoning 心跳事件会把可见消息挤出历史窗口。这些补丁就是修这些的。
 

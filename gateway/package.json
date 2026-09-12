@@ -1,0 +1,18 @@
+{
+  "name": "rcodex-gateway",
+  "version": "0.1.0",
+  "description": "A clean-room, self-hosted gateway that drives the Codex app-server and serves a console + HTTP API compatible with the rCodex app.",
+  "license": "MIT",
+  "type": "module",
+  "private": false,
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "rcodex-gateway": "./src/cli.mjs"
+  },
+  "scripts": {
+    "start": "node src/cli.mjs start",
+    "test": "node --test test/*.test.mjs"
+  }
+}
