@@ -1,0 +1,29 @@
+[Unit]
+Description=rCodex Gateway (goqn)
+After=network.target
+StartLimitIntervalSec=600
+StartLimitBurst=10
+
+[Service]
+Type=simple
+User=appuser
+Group=appuser
+WorkingDirectory=/home/appuser
+Environment=HOME=/home/appuser
+Environment=RCODEX_GATEWAY_CONFIG_DIR=/home/appuser/.rcodex/gateway
+Environment=RCODEX_GATEWAY_DATA_DIR=/home/appuser/.rcodex/gateway/data
+Environment=RCODEX_GATEWAY_ENV=/home/appuser/.rcodex/gateway/gateway.env
+Environment=CODEX_HOME=/home/appuser/.codex
+Environment=PATH=/opt/node-v24.14.1/bin:/home/appuser/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStartPre=/opt/node-v24.14.1/bin/node /home/appuser/.local/share/rcodex-gateway-maintained/scripts/patch-gateway.mjs --target /home/appuser/.local/lib/node_modules/@rcodex-lab/gateway --fail-open
+ExecStart=/opt/node-v24.14.1/bin/node /home/appuser/.local/lib/node_modules/@rcodex-lab/gateway/dist/cli.js service run
+Restart=on-failure
+RestartSec=5
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=30
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

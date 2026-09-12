@@ -1,0 +1,22 @@
+{
+  "name": "rcodex-maintained",
+  "version": "1.4.37-maintained.1",
+  "private": false,
+  "type": "module",
+  "license": "MIT",
+  "description": "Community maintenance overlay for the rCodex Gateway: message-preservation patches, a token-metered budget guard, and deploy helpers.",
+  "keywords": [
+    "rcodex",
+    "codex",
+    "gateway",
+    "patches"
+  ],
+  "scripts": {
+    "test": "node --test patches/tests/*.test.mjs",
+    "patch": "node patches/patch-gateway.mjs --strict",
+    "verify": "node patches/patch-gateway.mjs --verify-only --strict"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

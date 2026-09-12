@@ -1,0 +1,28 @@
+[Unit]
+Description=rCodex budget guard (DeepSeek spend cap)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=appuser
+Group=appuser
+WorkingDirectory=/home/appuser/rcodex-guard
+Environment=GUARD_PORT=8788
+Environment=GUARD_BIND=127.0.0.1
+Environment=GUARD_UPSTREAM=https://api.deepseek.com
+# 总量上限 ¥10（按 token 计费累计，达到即拒绝）；每日/余额底线已关闭
+Environment=GUARD_TOTAL_CNY=10
+Environment=GUARD_DAILY_CNY=0
+Environment=GUARD_FLOOR_CNY=0
+Environment=GUARD_USD_CNY=7.1
+Environment=GUARD_FAIL_MODE=closed
+Environment=GUARD_STATE_FILE=/home/appuser/rcodex-guard/state.json
+ExecStart=/opt/node-v24.14.1/bin/node /home/appuser/rcodex-guard/guard.mjs
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
