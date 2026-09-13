@@ -58,8 +58,10 @@ EventSource 不能带 header，支持 `?token=`。
   `turn/plan/updated`、`item/commandExecution/outputDelta` 等，原样透传给控制台/App
 - `thread/start` 的 `sandbox` 是字符串（`danger-full-access`），而 `turn/start` 的
   `sandboxPolicy` 是内部标记枚举（`{type:"dangerFullAccess"}`）——两者的形状不一样，踩过坑
-- 服务端反向请求（审批、`item/tool/requestUserInput`）：当前版本一律礼貌拒绝并记录日志，
-  审批 UI 在路线图 Phase 1
+- 服务端反向请求：当前版本一律礼貌拒绝并记录日志。**在
+  `--dangerously-bypass-approvals-and-sandbox` + `approval_policy="never"` 的全权模式下，
+  本机不会收到审批类请求**（这段是保险丝）；`item/tool/requestUserInput`（agent 向人提问）
+  在 Phase 1 做，它跟权限审批不是一回事
 
 ## 安全模型
 
