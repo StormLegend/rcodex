@@ -136,3 +136,140 @@ test("the console page and health endpoint are public", async () => {
     await gateway.close();
   }
 });
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function waitFor(check, { timeoutMs = 5000, intervalMs = 50 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const value = await check();
+    if (value) return value;
+    await sleep(intervalMs);
+  }
+  return undefined;
+}
+
+test("ask mode surfaces an approval request and forwards the human decision", async () => {
+  const { gateway, workspace } = setup();
+  const base = await listen(gateway);
+  try {
+    const token = await login(base, gateway);
+    const headers = { "Content-Type": "application/json", Authorization: `Bearer ${token}` };
+
+    const created = await fetch(`${base}/sessions`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ workspacePath: workspace, prompt: "please ask-approval", permissionMode: "ask" }),
+    });
+    assert.equal(created.status, 201);
+    const { session } = await created.json();
+    assert.equal(session.permissionMode, "ask");
+
+    const request = await waitFor(() =>
+      gateway.bus
+        .history(session.id)
+        .map((entry) => entry.payload)
+        .find((payload) => payload?.request?.kind === "approval")?.request,
+    );
+    assert.ok(request, "expected a session-approval event");
+    assert.match(request.payload.reason, /rm -rf/);
+
+    const waiting = await (await fetch(`${base}/sessions/${session.id}`, { headers })).json();
+    assert.equal(waiting.session.status, "waiting-approval", "the turn waits for the human");
+
+    const pending = await (await fetch(`${base}/sessions/${session.id}/requests`, { headers })).json();
+    assert.equal(pending.requests.length, 1);
+
+    const decided = await fetch(`${base}/sessions/${session.id}/approvals/${request.id}`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ decision: "approve" }),
+    });
+    assert.equal(decided.status, 200);
+
+    const resolved = await waitFor(() =>
+      gateway.bus
+        .history(session.id)
+        .map((entry) => entry.payload)
+        .find((payload) => payload?.eventType === "item/approvalResolved"),
+    );
+    assert.equal(resolved.jsonPayload.decision, "accept", "app-server receives an accept decision");
+
+    const finished = await waitFor(async () => {
+      const detail = await (await fetch(`${base}/sessions/${session.id}`, { headers })).json();
+      return detail.session.status === "completed" ? detail.session : undefined;
+    });
+    assert.ok(finished, "the turn completes after the decision");
+  } finally {
+    await gateway.close();
+  }
+});
+
+test("agent questions are answered through the API", async () => {
+  const { gateway, workspace } = setup();
+  const base = await listen(gateway);
+  try {
+    const token = await login(base, gateway);
+    const headers = { "Content-Type": "application/json", Authorization: `Bearer ${token}` };
+
+    const created = await fetch(`${base}/sessions`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ workspacePath: workspace, prompt: "please ask-question", permissionMode: "auto" }),
+    });
+    const { session } = await created.json();
+
+    const question = await waitFor(() =>
+      gateway.bus
+        .history(session.id)
+        .map((entry) => entry.payload)
+        .find((payload) => payload?.request?.kind === "question")?.request,
+    );
+    assert.ok(question, "expected a session-question event");
+    assert.equal(question.questions[0].id, "q1");
+    assert.deepEqual(question.questions[0].options.map((option) => option.label), ["a.txt", "b.txt"]);
+
+    const answered = await fetch(`${base}/sessions/${session.id}/questions/${question.id}`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ answers: { q1: ["b.txt"] } }),
+    });
+    assert.equal(answered.status, 200);
+
+    const echo = await waitFor(() =>
+      gateway.bus
+        .history(session.id)
+        .map((entry) => entry.payload)
+        .find((payload) => payload?.eventType === "item/answersReceived"),
+    );
+    assert.deepEqual(echo.jsonPayload.answers, { q1: { answers: ["b.txt"] } });
+  } finally {
+    await gateway.close();
+  }
+});
+
+test("auto and full modes never wait for a human", async () => {
+  for (const mode of ["auto", "full"]) {
+    const { gateway, workspace } = setup();
+    const base = await listen(gateway);
+    try {
+      const token = await login(base, gateway);
+      const headers = { "Content-Type": "application/json", Authorization: `Bearer ${token}` };
+      const created = await fetch(`${base}/sessions`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ workspacePath: workspace, prompt: "please ask-approval", permissionMode: mode }),
+      });
+      const { session } = await created.json();
+      const finished = await waitFor(async () => {
+        const detail = await (await fetch(`${base}/sessions/${session.id}`, { headers })).json();
+        return detail.session.status === "completed" ? detail.session : undefined;
+      });
+      assert.ok(finished, `${mode} mode must not block on approvals`);
+      const pending = await (await fetch(`${base}/sessions/${session.id}/requests`, { headers })).json();
+      assert.equal(pending.requests.length, 0, `${mode} mode leaves nothing pending`);
+    } finally {
+      await gateway.close();
+    }
+  }
+});

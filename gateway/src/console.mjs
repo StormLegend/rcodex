@@ -15,6 +15,10 @@ export function renderConsoleHtml({ gatewayName, version }) {
   #sidebar { border-right:1px solid #1e2a44; overflow:auto; padding:12px; }
   #detail { display:flex; flex-direction:column; min-width:0; }
   #log { flex:1; overflow:auto; padding:16px; white-space:pre-wrap; font-family:ui-monospace, Menlo, Consolas, monospace; font-size:13px; }
+  #pending { border-top:1px solid #1e2a44; padding:0 10px; }
+  .pending { background:#20182c; border:1px solid #4c3a63; border-radius:8px; padding:10px; margin:10px 0; }
+  .pending pre { margin:6px 0; white-space:pre-wrap; color:#cbd5e1; }
+  .pending .row { margin-top:8px; }
   footer { border-top:1px solid #1e2a44; padding:10px; display:flex; gap:8px; }
   input, button, textarea { font:inherit; background:#0f1a2e; color:#e2e8f0; border:1px solid #263758; border-radius:8px; padding:8px 10px; }
   button { cursor:pointer; background:#1d4ed8; border-color:#1d4ed8; }
@@ -54,6 +58,7 @@ export function renderConsoleHtml({ gatewayName, version }) {
   </aside>
   <section id="detail">
     <div id="log" class="muted">选择一个会话，或在左上角新建。</div>
+    <div id="pending"></div>
     <footer>
       <textarea id="prompt" placeholder="输入指令，Enter 发送（Shift+Enter 换行）"></textarea>
       <button onclick="sendTurn()">发送</button>
@@ -81,6 +86,92 @@ function logLine(text, cls = "") {
   el.classList.remove("muted");
   el.innerHTML += '<span class="' + cls + '">' + text.replace(/[<>&]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c])) + "</span>\\n";
   el.scrollTop = el.scrollHeight;
+}
+
+function escapeHtml(text) {
+  return String(text ?? "").replace(/[<>&]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c]));
+}
+
+async function decideApproval(id, decision, element) {
+  await api("/sessions/" + encodeURIComponent(currentSession) + "/approvals/" + encodeURIComponent(id), {
+    method: "POST",
+    body: JSON.stringify({ decision }),
+  });
+  element.remove();
+}
+
+function renderApproval(request) {
+  const element = document.createElement("div");
+  element.className = "pending";
+  const reason = request.payload?.reason || "Codex 请求授权";
+  const command = request.payload?.command ? "<pre>" + escapeHtml(request.payload.command) + "</pre>" : "";
+  element.innerHTML = "<b>[审批]</b> " + escapeHtml(reason) + command;
+  const row = document.createElement("div");
+  row.className = "row";
+  const approve = document.createElement("button");
+  approve.textContent = "批准";
+  approve.onclick = () => decideApproval(request.id, "approve", element);
+  const deny = document.createElement("button");
+  deny.className = "secondary";
+  deny.textContent = "拒绝";
+  deny.onclick = () => decideApproval(request.id, "deny", element);
+  row.append(approve, deny);
+  element.appendChild(row);
+  document.getElementById("pending").appendChild(element);
+}
+
+function renderQuestion(request) {
+  const element = document.createElement("div");
+  element.className = "pending";
+  const inputs = new Map();
+  element.innerHTML = "<b>[提问]</b>";
+  for (const question of request.questions ?? []) {
+    const label = document.createElement("div");
+    label.innerHTML = "<div style='margin:6px 0 4px'>" + escapeHtml(question.question || question.header) + "</div>";
+    element.appendChild(label);
+    if (question.options?.length) {
+      const optionsRow = document.createElement("div");
+      optionsRow.className = "row";
+      for (const option of question.options) {
+        const button = document.createElement("button");
+        button.className = "secondary";
+        button.textContent = option.label;
+        button.onclick = async () => {
+          inputs.set(question.id, [option.label]);
+          await submitQuestion(request.id, inputs, element);
+        };
+        optionsRow.appendChild(button);
+      }
+      element.appendChild(optionsRow);
+    }
+    const input = document.createElement("input");
+    input.placeholder = "输入回答后回车";
+    input.onkeydown = async (event) => {
+      if (event.key !== "Enter") return;
+      inputs.set(question.id, [input.value]);
+      await submitQuestion(request.id, inputs, element);
+    };
+    inputs.set(question.id, []);
+    element.appendChild(input);
+  }
+  const row = document.createElement("div");
+  row.className = "row";
+  const submit = document.createElement("button");
+  submit.textContent = "提交";
+  submit.onclick = () => submitQuestion(request.id, inputs, element);
+  row.appendChild(submit);
+  element.appendChild(row);
+  document.getElementById("pending").appendChild(element);
+}
+
+async function submitQuestion(requestId, inputs, element) {
+  const answers = {};
+  for (const [questionId, values] of inputs) answers[questionId] = values;
+  await api("/sessions/" + encodeURIComponent(currentSession) + "/questions/" + encodeURIComponent(requestId), {
+    method: "POST",
+    body: JSON.stringify({ answers }),
+  });
+  element.remove();
 }
 
 async function loadCaptcha() {
@@ -129,6 +220,7 @@ async function loadSessions() {
 function openSession(id) {
   currentSession = id;
   document.getElementById("log").innerHTML = "";
+  document.getElementById("pending").innerHTML = "";
   document.getElementById("log").classList.remove("muted");
   if (stream) stream.close();
   stream = new EventSource("/sessions/" + encodeURIComponent(id) + "/events?token=" + encodeURIComponent(token));
@@ -137,6 +229,9 @@ function openSession(id) {
     const payload = entry.payload || {};
     if (entry.type === "session-message-delta") logLine(payload.text || "", "msg-agent");
     else if (entry.type === "session-status") logLine("[status] " + payload.status, "muted");
+    else if (entry.type === "session-approval") renderApproval(payload.request);
+    else if (entry.type === "session-question") renderQuestion(payload.request);
+    else if (entry.type === "session-approval-resolved") logLine("[审批] " + payload.decision, "muted");
   };
   loadSessions();
 }

@@ -12,18 +12,13 @@
 
 ## Phase 1 —— 达到"日常可用"
 
-> 关于"审批"：这是**运行模式**相关的能力，不是网关必需品。本机（以及 qn）的 Codex 包装脚本
-> 用的是 `--dangerously-bypass-approvals-and-sandbox` + `approval_policy="never"` +
-> `sandbox_mode="danger-full-access"`，app-server 根本不会发出 `requestApproval`。个人自用网关
-> 保持全权模式即可，不需要审批 UI；只有当你想把 Codex 切到受限模式（`workspace-write` +
-> `on-request`，也就是 Codex 的原生默认）时才需要有人回执。
+> 权限模式按 rCodex 的三档实现：**请求批准（`ask`）/ 帮我批准（`auto`）/ 完全访问（`full`）**。
+> `auto` 由 Codex 自己的 reviewer 批准，只有 `ask` 会打扰人；`full` 不限制也不询问。
+> 提问（`item/tool/requestUserInput`）三档都可能出现，跟权限审批分开处理。
 
-- [ ] `item/tool/requestUserInput` 回执：这不是权限审批，而是 agent 执行中向人提问
-      （"覆盖哪个文件？""分支叫什么？"）。任何模式下都可能出现，无人应答时 agent 只能自己猜，
-      个人网关更需要它
-- [ ] （可选）审批 UI：`item/commandExecution/requestApproval`、`applyPatchApproval`、
-      `item/permissions/requestApproval`，仅在切到受限模式时才需要；
-      全权模式下保持"直接拒绝 + 记日志"即可
+- [x] 三档权限模式：`ask` / `auto` / `full` → app-server 参数映射，已用真实 Codex 跑通
+- [x] 审批回执：`session-approval` 事件 + 控制台批准/拒绝 + `POST /sessions/:id/approvals/:requestId`
+- [x] 提问回执：`session-question` 事件 + 控制台选项/输入框 + `POST /sessions/:id/questions/:requestId`
 - [ ] 会话恢复：网关重启后 `thread/resume` 挂回运行中的线程
 - [ ] 附件：上传（`/sessions/:id/attachments`）、下载、图片 inline 展示
 - [ ] 目录/文件变更视图：`turn/diff/updated` 渲染为可读 diff

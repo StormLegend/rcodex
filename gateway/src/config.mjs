@@ -57,6 +57,7 @@ export function loadConfig({ env = process.env, envFile } = {}) {
     codexCommand: get("CODEX_COMMAND", "codex"),
     codexModels: splitList(get("CODEX_AVAILABLE_MODELS", "")),
     codexAppServerStartupTimeoutMs: Number(get("CODEX_APP_SERVER_STARTUP_TIMEOUT_MS", "60000")),
+    defaultPermissionMode: get("GATEWAY_PERMISSION_MODE", "full"),
     authUsername: get("GATEWAY_AUTH_USERNAME", "admin"),
     authPassword: get("GATEWAY_AUTH_PASSWORD", ""),
     authToken: get("GATEWAY_AUTH_TOKEN", ""),

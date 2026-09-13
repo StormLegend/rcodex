@@ -1,4 +1,11 @@
 import { CodexAppServer } from "./codex-app-server.mjs";
+import {
+  approvalFamily,
+  isApprovalRequestMethod,
+  parsePermissionMode,
+  permissionSettingsForMode,
+} from "./permissions.mjs";
+import { createRequestStore } from "./requests.mjs";
 import { newId, nowIso, trimmed } from "./util.mjs";
 
 const TERMINAL_STATUSES = new Set(["completed", "failed"]);
@@ -13,8 +20,30 @@ function defaultAppServerFactory(config, logger) {
   });
 }
 
-export function createSessionManager({ config, store, bus, logger, appServerFactory }) {
+function normalizeQuestions(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((item) => ({
+    id: String(item?.id ?? ""),
+    header: String(item?.header ?? ""),
+    question: String(item?.question ?? ""),
+    isOther: Boolean(item?.isOther),
+    isSecret: Boolean(item?.isSecret),
+    options: Array.isArray(item?.options)
+      ? item.options.map((option) => ({ label: String(option?.label ?? ""), description: String(option?.description ?? "") }))
+      : [],
+  }));
+}
+
+export function createSessionManager({
+  config,
+  store,
+  bus,
+  logger,
+  appServerFactory,
+  requestTimeoutMs = 600000,
+}) {
   const factory = appServerFactory ?? (() => defaultAppServerFactory(config, logger));
+  const requests = createRequestStore({ timeoutMs: requestTimeoutMs, logger });
   const threadToSession = new Map();
   let appServer;
   let starting;
@@ -25,10 +54,7 @@ export function createSessionManager({ config, store, bus, logger, appServerFact
       starting = (async () => {
         const client = factory();
         client.onNotification(handleNotification);
-        client.onServerRequest((message) => {
-          logger.warn("codex app-server requested", message.method, "- refusing (no approval UI yet)");
-          return false;
-        });
+        client.onServerRequest(handleServerRequest);
         await client.initialize();
         appServer = client;
         starting = undefined;
@@ -44,14 +70,14 @@ export function createSessionManager({ config, store, bus, logger, appServerFact
   function emitOutput(sessionId, method, params) {
     bus.emit(sessionId, {
       type: "session-output",
-      payload: {
-        sessionId,
-        stream: "event",
-        format: "jsonl",
-        eventType: method,
-        jsonPayload: params ?? {},
-      },
+      payload: { sessionId, stream: "event", format: "jsonl", eventType: method, jsonPayload: params ?? {} },
     });
+  }
+
+  function setStatus(sessionId, status, extra = {}) {
+    const updated = store.update(sessionId, () => ({ status, lastUpdatedAt: nowIso(), ...extra }));
+    if (updated) bus.emit(sessionId, { type: "session-status", payload: { sessionId, status, session: updated } });
+    return updated;
   }
 
   function handleNotification(message) {
@@ -77,26 +103,103 @@ export function createSessionManager({ config, store, bus, logger, appServerFact
       const nextStatus =
         status === "systemError" ? "failed" : status === "idle" ? "completed" : status === "active" ? "running" : undefined;
       if (nextStatus && nextStatus !== session.status) {
-        const updated = store.update(sessionId, () => ({
-          status: nextStatus,
-          lastUpdatedAt: nowIso(),
-          ...(TERMINAL_STATUSES.has(nextStatus) ? { finishedAt: nowIso(), lastTurnFinishedAt: nowIso() } : {}),
-        }));
-        bus.emit(sessionId, { type: "session-status", payload: { sessionId, status: nextStatus, session: updated } });
+        setStatus(sessionId, nextStatus, TERMINAL_STATUSES.has(nextStatus) ? { finishedAt: nowIso(), lastTurnFinishedAt: nowIso() } : {});
       }
       return;
     }
 
     if (message.method === "turn/completed") {
-      const updated = store.update(sessionId, () => ({
-        status: "completed",
+      setStatus(sessionId, "completed", {
         activeTurnId: undefined,
         finishedAt: nowIso(),
         lastTurnFinishedAt: nowIso(),
-        lastUpdatedAt: nowIso(),
-      }));
-      bus.emit(sessionId, { type: "session-status", payload: { sessionId, status: "completed", session: updated } });
+      });
     }
+  }
+
+  /**
+   * Server→client requests from the app-server. Returns true when we took
+   * ownership of the request (the client responds itself).
+   */
+  async function handleServerRequest(message) {
+    const params = message.params ?? {};
+    const threadId = params.threadId ?? params.thread?.id;
+    const sessionId = threadId ? threadToSession.get(threadId) : undefined;
+    const session = sessionId ? store.get(sessionId) : undefined;
+    if (!session) {
+      logger.warn(`refusing request for an unknown thread: method=${message.method} threadId=${threadId ?? "unknown"}`);
+      return false;
+    }
+    const mode = session.permissionMode ?? "full";
+
+    if (isApprovalRequestMethod(message.method)) {
+      const payload = {
+        family: approvalFamily(message.method),
+        requestMethod: message.method,
+        reason: params.reason ?? params.message ?? "Codex 请求授权",
+        command: params.command,
+        cwd: params.cwd,
+        itemId: params.itemId,
+      };
+
+      if (mode === "ask") {
+        const entry = requests.create({
+          sessionId,
+          kind: "approval",
+          summary: payload.reason,
+          payload,
+          backendRequestId: message.id,
+        });
+        setStatus(sessionId, "waiting-approval", { activeTurnId: session.activeTurnId });
+        bus.emit(sessionId, {
+          type: "session-approval",
+          payload: { sessionId, request: { id: entry.id, kind: "approval", payload, createdAt: entry.createdAt } },
+        });
+        const decision = await entry.promise;
+        const approved = decision?.decision === "approve";
+        appServer.respond(message.id, { decision: approved ? "accept" : "decline" });
+        bus.emit(sessionId, {
+          type: "session-approval-resolved",
+          payload: { sessionId, id: entry.id, decision: approved ? "approved" : "rejected", note: decision?.note },
+        });
+        setStatus(sessionId, "running");
+        return true;
+      }
+
+      // auto: Codex reviews the escalation itself; full: nothing is restricted.
+      appServer.respond(message.id, { decision: "accept" });
+      bus.emit(sessionId, {
+        type: "session-approval-auto",
+        payload: { sessionId, mode, requestMethod: message.method, reason: payload.reason },
+      });
+      return true;
+    }
+
+    if (message.method === "item/tool/requestUserInput") {
+      const questions = normalizeQuestions(params.questions);
+      const entry = requests.create({
+        sessionId,
+        kind: "question",
+        summary: questions.map((question) => question.question).filter(Boolean).join(" / ") || "需要用户回答",
+        payload: { questions },
+        backendRequestId: message.id,
+      });
+      setStatus(sessionId, "waiting-approval", { activeTurnId: session.activeTurnId });
+      bus.emit(sessionId, {
+        type: "session-question",
+        payload: { sessionId, request: { id: entry.id, kind: "question", questions, createdAt: entry.createdAt } },
+      });
+      const answer = await entry.promise;
+      appServer.respond(message.id, { answers: answer?.answers ?? {} });
+      bus.emit(sessionId, {
+        type: "session-question-answered",
+        payload: { sessionId, id: entry.id, answers: answer?.answers ?? {} },
+      });
+      setStatus(sessionId, "running");
+      return true;
+    }
+
+    return false;
   }
 
   async function createSession({ workspacePath, prompt, model, reasoningEffort, title, permissionMode }) {
@@ -107,24 +210,20 @@ export function createSessionManager({ config, store, bus, logger, appServerFact
       error.statusCode = 400;
       throw error;
     }
+    const mode = parsePermissionMode(permissionMode, config.defaultPermissionMode ?? "full");
+    const settings = permissionSettingsForMode(mode, cwd);
     const client = await ensureAppServer();
     const sessionId = newId();
     const createdAt = nowIso();
     const requestedModel = trimmed(model) || config.codexModels[0] || undefined;
 
-    let thread;
-    try {
-      thread = await client.startThread({
-        cwd,
-        model: requestedModel,
-        approvalPolicy: permissionMode === "full" || !permissionMode ? "never" : "on-request",
-        approvalsReviewer: "user",
-        sandbox: "danger-full-access",
-      });
-    } catch (error) {
-      error.statusCode = error.statusCode ?? 502;
-      throw error;
-    }
+    const thread = await client.startThread({
+      cwd,
+      model: requestedModel,
+      approvalPolicy: settings.approvalPolicy,
+      approvalsReviewer: settings.approvalsReviewer,
+      sandbox: settings.sandbox,
+    });
     const threadId = thread?.id;
     if (!threadId) {
       const error = new Error("codex app-server did not return a thread id");
@@ -142,6 +241,7 @@ export function createSessionManager({ config, store, bus, logger, appServerFact
       latestPrompt: cleanPrompt,
       workspacePath: cwd,
       status: "starting",
+      permissionMode: mode,
       canResume: true,
       resumeStatus: "resumable",
       command: `${config.codexCommand} app-server`,
@@ -165,24 +265,13 @@ export function createSessionManager({ config, store, bus, logger, appServerFact
         cwd,
         model: requestedModel,
         effort: reasoningEffort,
-        approvalPolicy: "never",
-        approvalsReviewer: "user",
-        sandboxPolicy: { type: "dangerFullAccess" },
+        approvalPolicy: settings.approvalPolicy,
+        approvalsReviewer: settings.approvalsReviewer,
+        sandboxPolicy: settings.sandboxPolicy,
       });
-      const running = store.update(sessionId, () => ({
-        status: "running",
-        activeTurnId: turnId,
-        lastUpdatedAt: nowIso(),
-      }));
-      bus.emit(sessionId, { type: "session-status", payload: { sessionId, status: "running", session: running } });
+      setStatus(sessionId, "running", { activeTurnId: turnId, lastTurnStartedAt: nowIso() });
     } catch (error) {
-      const failed = store.update(sessionId, () => ({
-        status: "failed",
-        exitReason: String(error.message ?? error),
-        finishedAt: nowIso(),
-        lastUpdatedAt: nowIso(),
-      }));
-      bus.emit(sessionId, { type: "session-status", payload: { sessionId, status: "failed", session: failed } });
+      setStatus(sessionId, "failed", { exitReason: String(error.message ?? error), finishedAt: nowIso() });
       throw error;
     }
 
@@ -202,6 +291,7 @@ export function createSessionManager({ config, store, bus, logger, appServerFact
       error.statusCode = 400;
       throw error;
     }
+    const settings = permissionSettingsForMode(session.permissionMode ?? "full", session.workspacePath);
     const client = await ensureAppServer();
     const turnId = await client.startTurn({
       threadId: session.providerSessionId,
@@ -209,9 +299,9 @@ export function createSessionManager({ config, store, bus, logger, appServerFact
       cwd: session.workspacePath,
       model: session.modelOverride,
       effort: session.reasoningEffort,
-      approvalPolicy: "never",
-      approvalsReviewer: "user",
-      sandboxPolicy: { type: "dangerFullAccess" },
+      approvalPolicy: settings.approvalPolicy,
+      approvalsReviewer: settings.approvalsReviewer,
+      sandboxPolicy: settings.sandboxPolicy,
     });
     const updated = store.update(sessionId, () => ({
       status: "running",
@@ -237,9 +327,36 @@ export function createSessionManager({ config, store, bus, logger, appServerFact
     return store.get(sessionId);
   }
 
+  function listRequests(sessionId) {
+    return requests.list(sessionId);
+  }
+
+  async function resolveApproval(sessionId, requestId, decision, note) {
+    const entry = requests.get(requestId);
+    if (!entry || entry.sessionId !== sessionId || entry.kind !== "approval") {
+      const error = new Error("approval request not found");
+      error.statusCode = 404;
+      throw error;
+    }
+    await requests.resolve(requestId, { decision, note });
+    return { id: requestId, decision };
+  }
+
+  async function answerQuestion(sessionId, requestId, answers) {
+    const entry = requests.get(requestId);
+    if (!entry || entry.sessionId !== sessionId || entry.kind !== "question") {
+      const error = new Error("question request not found");
+      error.statusCode = 404;
+      throw error;
+    }
+    await requests.resolve(requestId, { answers });
+    return { id: requestId, answers };
+  }
+
   function remove(sessionId) {
     const session = store.get(sessionId);
     if (!session) return false;
+    requests.cancelForSession(sessionId);
     if (session.providerSessionId) threadToSession.delete(session.providerSessionId);
     store.remove(sessionId);
     bus.forget(sessionId);
@@ -251,5 +368,15 @@ export function createSessionManager({ config, store, bus, logger, appServerFact
     appServer = undefined;
   }
 
-  return { createSession, runTurn, interrupt, remove, shutdown, ensureAppServer };
+  return {
+    createSession,
+    runTurn,
+    interrupt,
+    remove,
+    shutdown,
+    ensureAppServer,
+    listRequests,
+    resolveApproval,
+    answerQuestion,
+  };
 }

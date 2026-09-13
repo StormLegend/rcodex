@@ -40,6 +40,9 @@ node src/cli.mjs start
 | GET/DELETE | `/sessions/:id` | 会话详情 / 删除 |
 | POST | `/sessions/:id/turns` | 追加一轮 |
 | POST | `/sessions/:id/interrupt` | 打断当前轮次 |
+| GET | `/sessions/:id/requests` | 当前等待人工处理的审批 / 提问 |
+| POST | `/sessions/:id/approvals/:requestId` | 审批回执 `{"decision":"approve"｜"deny"}` |
+| POST | `/sessions/:id/questions/:requestId` | 回答问题 `{"answers":{"q1":["选项"]}}` |
 | GET | `/sessions/:id/events` | SSE 事件流（先补历史，再推增量） |
 | GET | `/filesystem/roots` | 允许访问的根目录 |
 | GET | `/filesystem/list?path=` | 列目录 |
@@ -47,6 +50,22 @@ node src/cli.mjs start
 
 除 `/health`、`/console`、`/auth/*` 外都需要 `Authorization: Bearer <token>`；SSE 因为
 EventSource 不能带 header，支持 `?token=`。
+
+## 权限模式（三档，与 rCodex 一致）
+
+新建会话时用 `permissionMode` 指定，默认取 `GATEWAY_PERMISSION_MODE`（默认 `full`）：
+
+| 模式 | 中文 | Codex 侧设置 | 行为 |
+| --- | --- | --- | --- |
+| `ask` | 请求批准 | `approvalPolicy=on-request`、`approvalsReviewer=user`、沙箱 `workspace-write`（仅工作区可写） | 越权操作会发 `requestApproval`，网关把人挡在 `waiting-approval`，控制台出现**批准/拒绝**按钮，回执后继续 |
+| `auto` | 帮我批准 | `approvalPolicy=on-request`、`approvalsReviewer=auto_review`、同样沙箱 | 由 Codex 自己的 reviewer 批准，网关不打扰人（会记一条 `session-approval-auto` 事件） |
+| `full` | 完全访问 | `approvalPolicy=never`、沙箱 `danger-full-access` | 不限制、不询问 |
+
+另外，`item/tool/requestUserInput`（agent 向人**提问**，例如"写哪个文件？"）在三档里都可能出现，
+网关会把它渲染成提问卡片并通过 `/sessions/:id/questions/:requestId` 回执；它跟权限审批是两回事。
+
+> 实测：三个模式都拿真实 `codex app-server` 跑通过一轮（见下方冒烟命令，用
+> `SMOKE_PERMISSION_MODE=ask|auto|full` 切换）。
 
 ## 与 Codex 的对接
 
@@ -58,10 +77,8 @@ EventSource 不能带 header，支持 `?token=`。
   `turn/plan/updated`、`item/commandExecution/outputDelta` 等，原样透传给控制台/App
 - `thread/start` 的 `sandbox` 是字符串（`danger-full-access`），而 `turn/start` 的
   `sandboxPolicy` 是内部标记枚举（`{type:"dangerFullAccess"}`）——两者的形状不一样，踩过坑
-- 服务端反向请求：当前版本一律礼貌拒绝并记录日志。**在
-  `--dangerously-bypass-approvals-and-sandbox` + `approval_policy="never"` 的全权模式下，
-  本机不会收到审批类请求**（这段是保险丝）；`item/tool/requestUserInput`（agent 向人提问）
-  在 Phase 1 做，它跟权限审批不是一回事
+- 服务端反向请求：审批类请求按权限模式分流（`ask` 转人工、`auto`/`full` 直接接受），
+  `item/tool/requestUserInput` 转人工提问；无人应答时超时后按安全缺省处理（审批=拒绝、提问=空答案）
 
 ## 安全模型
 

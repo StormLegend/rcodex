@@ -21,6 +21,7 @@ if (process.env.RCODEX_SMOKE !== "1") {
 
 const workspace = path.resolve(process.argv[2] ?? fs.mkdtempSync(path.join(os.tmpdir(), "rcodex-smoke-ws-")));
 const prompt = process.argv[3] ?? "只回复两个字：收到";
+const permissionMode = process.env.SMOKE_PERMISSION_MODE ?? "full";
 fs.mkdirSync(workspace, { recursive: true });
 
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "rcodex-smoke-data-"));
@@ -48,7 +49,7 @@ console.log(`gateway up at ${base}, workspace ${workspace}`);
 const created = await fetch(`${base}/sessions`, {
   method: "POST",
   headers: auth,
-  body: JSON.stringify({ workspacePath: workspace, prompt }),
+  body: JSON.stringify({ workspacePath: workspace, prompt, permissionMode }),
 });
 const createdBody = await created.json();
 if (!created.ok) {
@@ -57,7 +58,7 @@ if (!created.ok) {
   process.exit(1);
 }
 const sessionId = createdBody.session.id;
-console.log(`session ${sessionId} started (${createdBody.session.modelLabel ?? "?"})`);
+console.log(`session ${sessionId} started (${createdBody.session.modelLabel ?? "?"}, permissionMode=${createdBody.session.permissionMode})`);
 
 const deadline = Date.now() + 180000;
 let session = createdBody.session;

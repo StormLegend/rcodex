@@ -12,6 +12,11 @@ function matchSessionChild(pathname, suffix) {
   return match ? decodeURIComponent(match[1]) : undefined;
 }
 
+function matchSessionAction(pathname, action) {
+  const match = pathname.match(new RegExp(`^/sessions/([^/]+)/${action}/([^/]+)$`));
+  return match ? { sessionId: decodeURIComponent(match[1]), requestId: decodeURIComponent(match[2]) } : undefined;
+}
+
 export function createGatewayServer({ config, logger }) {
   const captcha = createCaptchaStore();
   const bus = createEventBus();
@@ -98,6 +103,41 @@ export function createGatewayServer({ config, logger }) {
     if (req.method === "POST" && interruptSessionId) {
       const session = await sessions.interrupt(interruptSessionId);
       sendJson(res, 200, { session });
+      return true;
+    }
+    const requestsSessionId = matchSessionChild(pathname, "/requests");
+    if (req.method === "GET" && requestsSessionId) {
+      if (!store.get(requestsSessionId)) {
+        sendError(res, 404, "session not found", "not_found");
+        return true;
+      }
+      sendJson(res, 200, { requests: sessions.listRequests(requestsSessionId) });
+      return true;
+    }
+    const approvalRoute = matchSessionAction(pathname, "approvals");
+    if (req.method === "POST" && approvalRoute) {
+      const body = await readJsonBody(req);
+      const decision = body.decision === "approve" || body.decision === "accept" ? "approve" : "deny";
+      const result = await sessions.resolveApproval(approvalRoute.sessionId, approvalRoute.requestId, decision, body.note);
+      sendJson(res, 200, result);
+      return true;
+    }
+    const questionRoute = matchSessionAction(pathname, "questions");
+    if (req.method === "POST" && questionRoute) {
+      const body = await readJsonBody(req);
+      const entry = sessions.listRequests(questionRoute.sessionId).find((item) => item.id === questionRoute.requestId);
+      if (!entry) {
+        sendError(res, 404, "question request not found", "not_found");
+        return true;
+      }
+      const answers = {};
+      for (const question of entry.payload.questions ?? []) {
+        const provided = body.answers?.[question.id] ?? body.answer;
+        const list = Array.isArray(provided) ? provided.map(String) : provided === undefined ? [] : [String(provided)];
+        answers[question.id] = { answers: list };
+      }
+      const result = await sessions.answerQuestion(questionRoute.sessionId, questionRoute.requestId, answers);
+      sendJson(res, 200, result);
       return true;
     }
     const eventsSessionId = matchSessionChild(pathname, "/events");
