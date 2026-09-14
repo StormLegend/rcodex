@@ -14,6 +14,7 @@ const THREAD_ID = "thread-fake-1";
 const lines = createInterface({ input: process.stdin });
 
 let approvalPolicy = "never";
+let modelProvider = "custom";
 
 function send(payload) {
   process.stdout.write(`${JSON.stringify(payload)}\n`);
@@ -27,6 +28,10 @@ function finishTurn(text) {
   setTimeout(() => {
     notify("thread/status/changed", { threadId: THREAD_ID, status: { type: "active" } });
     notify("item/agentMessage/delta", { threadId: THREAD_ID, delta: text });
+    notify("thread/tokenUsage/updated", {
+      threadId: THREAD_ID,
+      tokenUsage: { total: { inputTokens: 12, outputTokens: 7, totalTokens: 19 } },
+    });
     notify("item/completed", { threadId: THREAD_ID, item: { type: "agentMessage", text } });
     notify("turn/completed", { threadId: THREAD_ID, turnId: "turn-1" });
     notify("thread/status/changed", { threadId: THREAD_ID, status: { type: "idle" } });
@@ -57,6 +62,7 @@ lines.on("line", (line) => {
   }
   if (method === "thread/start") {
     approvalPolicy = params?.approvalPolicy ?? "never";
+    modelProvider = params?.modelProvider ?? "custom";
     send({
       jsonrpc: "2.0",
       id,
@@ -64,13 +70,25 @@ lines.on("line", (line) => {
         thread: {
           id: THREAD_ID,
           model: params?.model ?? "deepseek-flash",
-          modelProvider: "custom",
+          modelProvider,
           reasoningEffort: "medium",
           cwd: params?.cwd,
           approvalPolicy,
         },
       },
     });
+    return;
+  }
+  if (method === "thread/resume") {
+    send({
+      jsonrpc: "2.0",
+      id,
+      result: { thread: { id: THREAD_ID, model: params?.model ?? "deepseek-flash", modelProvider: params?.modelProvider ?? modelProvider, reasoningEffort: "medium" } },
+    });
+    return;
+  }
+  if (method === "thread/settings/update") {
+    send({ jsonrpc: "2.0", id, result: { thread: { id: THREAD_ID, model: params?.model, reasoningEffort: params?.reasoningEffort } } });
     return;
   }
   if (method === "turn/start") {

@@ -10,7 +10,7 @@ import { newId, nowIso, trimmed } from "./util.mjs";
 
 const TERMINAL_STATUSES = new Set(["completed", "failed"]);
 
-function defaultAppServerFactory(config, logger) {
+  function defaultAppServerFactory(config, logger) {
   return new CodexAppServer({
     command: config.codexCommand,
     args: ["app-server"],
@@ -34,11 +34,24 @@ function normalizeQuestions(raw) {
   }));
 }
 
+function normalizeModelProvider(value) {
+  const provider = trimmed(value);
+  if (!provider) return undefined;
+  if (!/^[A-Za-z0-9_-]+$/.test(provider)) {
+    const error = new Error("modelProvider 只能包含字母、数字、下划线和连字符");
+    error.statusCode = 400;
+    error.code = "invalid_model_provider";
+    throw error;
+  }
+  return provider;
+}
+
 export function createSessionManager({
   config,
   store,
   bus,
   logger,
+  attachmentStore,
   appServerFactory,
   requestTimeoutMs = 600000,
 }) {
@@ -95,6 +108,18 @@ export function createSessionManager({
         type: "session-message-delta",
         payload: { sessionId, text: params.delta ?? params.text ?? "" },
       });
+      return;
+    }
+
+    if (message.method === "thread/tokenUsage/updated") {
+      const tokenUsage = params.tokenUsage ?? params.usage;
+      const updated = store.update(sessionId, () => ({
+        usage: tokenUsage && typeof tokenUsage === "object" ? tokenUsage : undefined,
+        lastUpdatedAt: nowIso(),
+      }));
+      if (updated) {
+        bus.emit(sessionId, { type: "session-usage", payload: { sessionId, usage: updated.usage, session: updated } });
+      }
       return;
     }
 
@@ -202,7 +227,7 @@ export function createSessionManager({
     return false;
   }
 
-  async function createSession({ workspacePath, prompt, model, reasoningEffort, title, permissionMode }) {
+  async function createSession({ workspacePath, prompt, model, modelProvider, reasoningEffort, title, permissionMode }) {
     const cwd = trimmed(workspacePath) || config.allowedPaths[0];
     const cleanPrompt = trimmed(prompt);
     if (!cleanPrompt) {
@@ -215,11 +240,20 @@ export function createSessionManager({
     const client = await ensureAppServer();
     const sessionId = newId();
     const createdAt = nowIso();
-    const requestedModel = trimmed(model) || config.codexModels[0] || undefined;
+    const requestedProvider = normalizeModelProvider(modelProvider) || config.codexDefaultProvider || "custom";
+    const providerEntry = (config.codexProviders ?? []).find((entry) => entry.provider === requestedProvider);
+    if ((config.codexProviders ?? []).length > 0 && !providerEntry) {
+      const error = new Error(`unknown model provider: ${requestedProvider}`);
+      error.statusCode = 400;
+      error.code = "unknown_model_provider";
+      throw error;
+    }
+    const requestedModel = trimmed(model) || providerEntry?.models?.[0] || config.codexModels[0] || undefined;
 
     const thread = await client.startThread({
       cwd,
       model: requestedModel,
+      modelProvider: requestedProvider,
       approvalPolicy: settings.approvalPolicy,
       approvalsReviewer: settings.approvalsReviewer,
       sandbox: settings.sandbox,
@@ -236,6 +270,7 @@ export function createSessionManager({
       id: sessionId,
       sessionType: "development",
       provider: "codex",
+      modelProvider: thread.modelProvider ?? requestedProvider,
       providerSessionId: threadId,
       title: trimmed(title) || cleanPrompt.slice(0, 40),
       latestPrompt: cleanPrompt,
@@ -254,6 +289,8 @@ export function createSessionManager({
       startedAt: createdAt,
       lastUpdatedAt: createdAt,
       lastTurnStartedAt: createdAt,
+      attachments: [],
+      usage: undefined,
     };
     store.upsert(session);
     bus.emit(sessionId, { type: "session-started", payload: { session } });
@@ -269,7 +306,12 @@ export function createSessionManager({
         approvalsReviewer: settings.approvalsReviewer,
         sandboxPolicy: settings.sandboxPolicy,
       });
-      setStatus(sessionId, "running", { activeTurnId: turnId, lastTurnStartedAt: nowIso() });
+      const current = store.get(sessionId);
+      if (current?.status === "waiting-approval") {
+        store.update(sessionId, () => ({ activeTurnId: turnId, lastTurnStartedAt: nowIso() }));
+      } else {
+        setStatus(sessionId, "running", { activeTurnId: turnId, lastTurnStartedAt: nowIso() });
+      }
     } catch (error) {
       setStatus(sessionId, "failed", { exitReason: String(error.message ?? error), finishedAt: nowIso() });
       throw error;
@@ -278,7 +320,7 @@ export function createSessionManager({
     return store.get(sessionId);
   }
 
-  async function runTurn(sessionId, prompt) {
+  async function runTurn(sessionId, prompt, attachmentIds = []) {
     const session = store.get(sessionId);
     if (!session) {
       const error = new Error("session not found");
@@ -293,6 +335,17 @@ export function createSessionManager({
     }
     const settings = permissionSettingsForMode(session.permissionMode ?? "full", session.workspacePath);
     const client = await ensureAppServer();
+    const requestedAttachmentIds = [...new Set(attachmentIds.map(String))];
+    const selectedAttachments = (session.attachments ?? []).filter((attachment) => requestedAttachmentIds.includes(attachment.id));
+    if (selectedAttachments.length !== requestedAttachmentIds.length) {
+      const error = new Error("one or more attachments do not belong to this session");
+      error.statusCode = 400;
+      error.code = "invalid_attachment_reference";
+      throw error;
+    }
+    const attachments = attachmentStore
+      ? await Promise.all(selectedAttachments.map((attachment) => attachmentStore.promptAttachment(session, attachment)))
+      : [];
     const turnId = await client.startTurn({
       threadId: session.providerSessionId,
       prompt: cleanPrompt,
@@ -302,6 +355,7 @@ export function createSessionManager({
       approvalPolicy: settings.approvalPolicy,
       approvalsReviewer: settings.approvalsReviewer,
       sandboxPolicy: settings.sandboxPolicy,
+      attachments,
     });
     const updated = store.update(sessionId, () => ({
       status: "running",
@@ -313,6 +367,114 @@ export function createSessionManager({
     }));
     bus.emit(sessionId, { type: "session-status", payload: { sessionId, status: "running", session: updated } });
     return updated;
+  }
+
+  async function addAttachment(sessionId, input) {
+    const session = store.get(sessionId);
+    if (!session) {
+      const error = new Error("session not found");
+      error.statusCode = 404;
+      throw error;
+    }
+    if (!attachmentStore) throw new Error("attachments are not configured");
+    if ((session.attachments ?? []).length >= 20) {
+      const error = new Error("session attachment limit exceeded");
+      error.statusCode = 400;
+      error.code = "too_many_attachments";
+      throw error;
+    }
+    const attachment = await attachmentStore.store(session, input);
+    const updated = store.update(sessionId, (current) => ({
+      attachments: [...(current.attachments ?? []), attachment],
+      lastUpdatedAt: nowIso(),
+    }));
+    return updated?.attachments?.find((item) => item.id === attachment.id) ?? attachment;
+  }
+
+  async function updateRuntimeConfig(sessionId, input = {}) {
+    const session = store.get(sessionId);
+    if (!session) {
+      const error = new Error("session not found");
+      error.statusCode = 404;
+      throw error;
+    }
+    if (input.modelProvider !== undefined && normalizeModelProvider(input.modelProvider) !== session.modelProvider) {
+      const error = new Error("Provider 绑定在 Codex thread 上，不能在原会话中切换；请新建会话");
+      error.statusCode = 409;
+      error.code = "model_provider_immutable";
+      throw error;
+    }
+    const model = input.model === undefined ? session.modelOverride : trimmed(input.model) || undefined;
+    const reasoningEffort = input.reasoningEffort === undefined ? session.reasoningEffort : trimmed(input.reasoningEffort) || undefined;
+    const client = await ensureAppServer();
+    await client.updateThreadSettings(session.providerSessionId, {
+      model,
+      reasoningEffort,
+      serviceTier: input.serviceTier,
+    });
+    const updated = store.update(sessionId, () => ({
+      modelOverride: model,
+      modelLabel: model,
+      reasoningEffort,
+      lastUpdatedAt: nowIso(),
+    }));
+    bus.emit(sessionId, { type: "session-runtime-config", payload: { sessionId, session: updated } });
+    return updated;
+  }
+
+  async function resumeSession(sessionId) {
+    const session = store.get(sessionId);
+    if (!session) {
+      const error = new Error("session not found");
+      error.statusCode = 404;
+      throw error;
+    }
+    if (["completed", "failed"].includes(session.status)) return session;
+    const settings = permissionSettingsForMode(session.permissionMode ?? "full", session.workspacePath);
+    const client = await ensureAppServer();
+    try {
+      const thread = await client.resumeThread({
+        threadId: session.providerSessionId,
+        cwd: session.workspacePath,
+        model: session.modelOverride,
+        modelProvider: session.modelProvider,
+        approvalPolicy: settings.approvalPolicy,
+        approvalsReviewer: settings.approvalsReviewer,
+        sandbox: settings.sandbox,
+      });
+      const threadId = thread?.id ?? session.providerSessionId;
+      threadToSession.set(threadId, sessionId);
+      const updated = store.update(sessionId, () => ({
+        providerSessionId: threadId,
+        status: "running",
+        resumeStatus: "resumed",
+        lastUpdatedAt: nowIso(),
+      }));
+      bus.emit(sessionId, { type: "session-resumed", payload: { sessionId, session: updated } });
+      return updated;
+    } catch (error) {
+      const updated = store.update(sessionId, () => ({
+        status: "failed",
+        resumeStatus: "failed",
+        exitReason: `resume failed: ${error.message ?? String(error)}`,
+        lastUpdatedAt: nowIso(),
+      }));
+      bus.emit(sessionId, { type: "session-resume-failed", payload: { sessionId, session: updated } });
+      throw error;
+    }
+  }
+
+  async function resumePersistedSessions() {
+    const resumable = store.list().filter((session) => !["completed", "failed"].includes(session.status) && session.providerSessionId);
+    const results = [];
+    for (const session of resumable) {
+      try {
+        results.push(await resumeSession(session.id));
+      } catch (error) {
+        logger.warn(`could not resume session ${session.id}: ${error.message ?? String(error)}`);
+      }
+    }
+    return results;
   }
 
   async function interrupt(sessionId) {
@@ -378,5 +540,9 @@ export function createSessionManager({
     listRequests,
     resolveApproval,
     answerQuestion,
+    addAttachment,
+    updateRuntimeConfig,
+    resumeSession,
+    resumePersistedSessions,
   };
 }

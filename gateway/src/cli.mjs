@@ -3,7 +3,7 @@ import { loadConfig } from "./config.mjs";
 import { createLogger } from "./logger.mjs";
 import { createGatewayServer } from "./server.mjs";
 
-const VERSION = "0.1.0";
+const VERSION = "0.2.0";
 
 function usage() {
   return [
@@ -18,6 +18,7 @@ function usage() {
     "  GATEWAY_HOST, GATEWAY_PORT, GATEWAY_NAME, GATEWAY_DATA_DIR,",
     "  GATEWAY_ALLOWED_PATHS, GATEWAY_AUTH_USERNAME, GATEWAY_AUTH_PASSWORD,",
     "  GATEWAY_AUTH_TOKEN, CODEX_COMMAND, CODEX_AVAILABLE_MODELS,",
+    "  CODEX_DEFAULT_MODEL_PROVIDER, CODEX_MODEL_PROVIDERS (JSON),",
     "  CODEX_APP_SERVER_STARTUP_TIMEOUT_MS",
   ].join("\n");
 }
@@ -54,6 +55,9 @@ gateway.server.listen(config.port, config.host, () => {
   logger.info(` Paths   : ${config.allowedPaths.join(", ")}`);
   logger.info(` Models  : ${config.codexModels.join(", ") || "(none configured)"}`);
   logger.info(` Sessions: ${gateway.store.list().length}`);
+  gateway.sessions.resumePersistedSessions().catch((error) => {
+    logger.warn(`session recovery completed with errors: ${error.message ?? String(error)}`);
+  });
 });
 
 gateway.server.on("error", (error) => {

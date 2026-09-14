@@ -54,12 +54,21 @@ export function renderConsoleHtml({ gatewayName, version }) {
       <input id="workspace" style="flex:1" placeholder="工作目录"/>
       <button onclick="createSession()">新建</button>
     </div>
+    <div class="row">
+      <select id="modelProvider" title="Provider"></select>
+      <select id="model" style="flex:1" title="模型"></select>
+      <select id="reasoning" title="推理强度">
+        <option value="low">low</option><option value="medium" selected>medium</option>
+        <option value="high">high</option><option value="xhigh">xhigh</option>
+      </select>
+    </div>
     <div id="sessions"></div>
   </aside>
   <section id="detail">
     <div id="log" class="muted">选择一个会话，或在左上角新建。</div>
     <div id="pending"></div>
     <footer>
+      <input id="attachments" type="file" multiple style="max-width:180px" title="附件"/>
       <textarea id="prompt" placeholder="输入指令，Enter 发送（Shift+Enter 换行）"></textarea>
       <button onclick="sendTurn()">发送</button>
     </footer>
@@ -197,7 +206,7 @@ async function doLogin() {
     localStorage.setItem("rcodex-gateway-token", token);
     document.getElementById("login").style.display = "none";
     document.getElementById("app").style.display = "grid";
-    await loadSessions();
+    await Promise.all([loadModels(), loadSessions()]);
   } catch (error) {
     document.getElementById("loginError").textContent = String(error.message || error);
     await loadCaptcha();
@@ -217,12 +226,46 @@ async function loadSessions() {
   }
 }
 
+async function loadModels() {
+  const data = await api("/version");
+  const providers = data.providers || [];
+  const providerSelect = document.getElementById("modelProvider");
+  providerSelect.innerHTML = "";
+  for (const entry of providers) {
+    const option = document.createElement("option");
+    option.value = entry.provider;
+    option.textContent = entry.provider;
+    providerSelect.appendChild(option);
+  }
+  providerSelect.value = data.defaultModelProvider || providers[0]?.provider || "";
+  providerSelect.onchange = () => renderProviderModels(providers);
+  renderProviderModels(providers);
+}
+
+function renderProviderModels(providers) {
+  const provider = document.getElementById("modelProvider").value;
+  const models = providers.find((entry) => entry.provider === provider)?.models || [];
+  const select = document.getElementById("model");
+  select.innerHTML = "";
+  for (const model of models) {
+    const option = document.createElement("option");
+    option.value = model;
+    option.textContent = model;
+    select.appendChild(option);
+  }
+}
+
 function openSession(id) {
   currentSession = id;
   document.getElementById("log").innerHTML = "";
   document.getElementById("pending").innerHTML = "";
   document.getElementById("log").classList.remove("muted");
   if (stream) stream.close();
+  api("/sessions/" + encodeURIComponent(id)).then(({ session }) => {
+    if (session.modelProvider) document.getElementById("modelProvider").value = session.modelProvider;
+    if (session.modelOverride) document.getElementById("model").value = session.modelOverride;
+    if (session.reasoningEffort) document.getElementById("reasoning").value = session.reasoningEffort;
+  }).catch(() => {});
   stream = new EventSource("/sessions/" + encodeURIComponent(id) + "/events?token=" + encodeURIComponent(token));
   stream.onmessage = (event) => {
     const entry = JSON.parse(event.data);
@@ -239,10 +282,52 @@ function openSession(id) {
 async function createSession() {
   const prompt = document.getElementById("prompt").value.trim() || "你好，做个自我介绍";
   const workspace = document.getElementById("workspace").value.trim() || undefined;
-  const data = await api("/sessions", { method: "POST", body: JSON.stringify({ workspacePath: workspace, prompt }) });
+  const data = await api("/sessions", { method: "POST", body: JSON.stringify({
+    workspacePath: workspace,
+    prompt,
+    model: document.getElementById("model").value || undefined,
+    modelProvider: document.getElementById("modelProvider").value || undefined,
+    reasoningEffort: document.getElementById("reasoning").value || undefined,
+  }) });
   document.getElementById("prompt").value = "";
   await loadSessions();
   openSession(data.session.id);
+}
+
+async function applyRuntimeConfig() {
+  if (!currentSession) return;
+  await api("/sessions/" + encodeURIComponent(currentSession) + "/runtime-config", {
+    method: "PUT",
+    body: JSON.stringify({
+      model: document.getElementById("model").value || undefined,
+      reasoningEffort: document.getElementById("reasoning").value || undefined,
+    }),
+  });
+}
+
+function readFileAsBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error || new Error("cannot read attachment"));
+    reader.onload = () => resolve(String(reader.result).split(",", 2)[1] || "");
+    reader.readAsDataURL(file);
+  });
+}
+
+async function uploadSelectedAttachments() {
+  const input = document.getElementById("attachments");
+  const files = [...(input.files || [])];
+  const ids = [];
+  for (const file of files) {
+    const body = { name: file.name, mimeType: file.type, data: await readFileAsBase64(file) };
+    const uploaded = await api("/sessions/" + encodeURIComponent(currentSession) + "/attachments", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+    ids.push(uploaded.attachment.id);
+  }
+  input.value = "";
+  return ids;
 }
 
 async function sendTurn() {
@@ -250,7 +335,9 @@ async function sendTurn() {
   if (!prompt || !currentSession) return;
   document.getElementById("prompt").value = "";
   logLine("> " + prompt, "msg-user");
-  await api("/sessions/" + encodeURIComponent(currentSession) + "/turns", { method: "POST", body: JSON.stringify({ prompt }) });
+  const attachmentIds = await uploadSelectedAttachments();
+  await applyRuntimeConfig();
+  await api("/sessions/" + encodeURIComponent(currentSession) + "/turns", { method: "POST", body: JSON.stringify({ prompt, attachmentIds }) });
 }
 
 document.addEventListener("keydown", (event) => {
@@ -260,11 +347,14 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
+document.getElementById("model").addEventListener("change", () => applyRuntimeConfig().catch(() => {}));
+document.getElementById("reasoning").addEventListener("change", () => applyRuntimeConfig().catch(() => {}));
+
 if (token) {
   api("/sessions").then(() => {
     document.getElementById("login").style.display = "none";
     document.getElementById("app").style.display = "grid";
-    return loadSessions();
+    return Promise.all([loadModels(), loadSessions()]);
   }).catch(() => { token = ""; loadCaptcha(); });
 } else {
   loadCaptcha();

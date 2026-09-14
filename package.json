@@ -1,10 +1,10 @@
 {
   "name": "rcodex-maintained",
-  "version": "1.4.37-maintained.1",
+  "version": "1.4.37-maintained.3",
   "private": false,
   "type": "module",
   "license": "MIT",
-  "description": "Community maintenance overlay for the rCodex Gateway: message-preservation patches, a token-metered budget guard, and deploy helpers.",
+  "description": "Community maintenance overlay for the rCodex Gateway: a clean-room gateway, message-preservation patches, and deploy helpers.",
   "keywords": [
     "rcodex",
     "codex",

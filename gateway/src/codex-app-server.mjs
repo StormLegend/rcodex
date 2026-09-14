@@ -151,7 +151,7 @@ export class CodexAppServer {
   async initialize() {
     await this.start();
     await this.request("initialize", {
-      clientInfo: { name: "rcodex-gateway", version: "0.1.0" },
+      clientInfo: { name: "rcodex-gateway", version: "0.2.0" },
       capabilities: { experimentalApi: true },
     });
   }
@@ -163,15 +163,51 @@ export class CodexAppServer {
       approvalsReviewer: options.approvalsReviewer,
       sandbox: options.sandbox,
       model: options.model,
+      modelProvider: options.modelProvider,
       ephemeral: false,
     });
     return response?.thread ?? response;
   }
 
-  async startTurn({ threadId, prompt, cwd, model, effort, approvalPolicy, approvalsReviewer, sandboxPolicy }) {
+  async resumeThread(options = {}) {
+    const response = await this.request("thread/resume", {
+      threadId: options.threadId,
+      cwd: options.cwd,
+      model: options.model,
+      modelProvider: options.modelProvider,
+      approvalPolicy: options.approvalPolicy,
+      approvalsReviewer: options.approvalsReviewer,
+      sandbox: options.sandbox,
+    });
+    return response?.thread ?? response;
+  }
+
+  async updateThreadSettings(threadId, settings = {}) {
+    const response = await this.request("thread/settings/update", {
+      threadId,
+      model: settings.model ?? null,
+      reasoningEffort: settings.reasoningEffort ?? null,
+      serviceTier: settings.serviceTier ?? null,
+    });
+    return response?.thread ?? response;
+  }
+
+  async startTurn({ threadId, prompt, cwd, model, effort, approvalPolicy, approvalsReviewer, sandboxPolicy, attachments = [] }) {
+    const input = [{ type: "text", text: prompt, text_elements: [] }];
+    for (const attachment of attachments) {
+      if (attachment.kind === "image" || attachment.mimeType?.startsWith("image/")) {
+        input.push({ type: "local_image", path: attachment.path });
+      } else {
+        input.push({
+          type: "text",
+          text: `\n[附件: ${attachment.name}]\n${attachment.content ?? attachment.path}\n`,
+          text_elements: [],
+        });
+      }
+    }
     const response = await this.request("turn/start", {
       threadId,
-      input: [{ type: "text", text: prompt, text_elements: [] }],
+      input,
       cwd,
       model,
       effort,

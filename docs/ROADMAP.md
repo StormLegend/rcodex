@@ -8,7 +8,7 @@
 - [x] 事件：SSE（历史回放 + 增量 + 保活），原样透传 app-server 通知
 - [x] 文件：白名单根目录、`realpath` 防越界、列目录、读文件（带截断）
 - [x] 控制台：登录、会话列表、流式输出、发消息
-- [x] 测试：10 个单元/集成用例 + 真实 `codex app-server` 实弹冒烟
+- [x] 测试：19 个单元/集成用例 + 真实 `codex app-server` 实弹冒烟
 
 ## Phase 1 —— 达到"日常可用"
 
@@ -19,11 +19,12 @@
 - [x] 三档权限模式：`ask` / `auto` / `full` → app-server 参数映射，已用真实 Codex 跑通
 - [x] 审批回执：`session-approval` 事件 + 控制台批准/拒绝 + `POST /sessions/:id/approvals/:requestId`
 - [x] 提问回执：`session-question` 事件 + 控制台选项/输入框 + `POST /sessions/:id/questions/:requestId`
-- [ ] 会话恢复：网关重启后 `thread/resume` 挂回运行中的线程
-- [ ] 附件：上传（`/sessions/:id/attachments`）、下载、图片 inline 展示
+- [x] 会话恢复：网关重启后 `thread/resume` 挂回运行中的线程
+- [x] 附件：上传（`/sessions/:id/attachments`），图片输入块和安全工作区存储
 - [ ] 目录/文件变更视图：`turn/diff/updated` 渲染为可读 diff
-- [ ] 模型与推理强度切换：`thread/settings/update` + 每会话记忆
-- [ ] token 用量：`thread/tokenUsage/updated` 聚合到会话与全局
+- [x] 模型与推理强度切换：`thread/settings/update` + 每会话记忆
+- [x] 会话级 Codex Provider/模型选择：`modelProvider` 绑定到 `thread/start` / `thread/resume`
+- [x] token 用量：`thread/tokenUsage/updated` 聚合到会话与全局
 - [ ] QR 配对：生成 `rcodex://` 连接串给 App 扫码
 
 ## Phase 2 —— 编排能力

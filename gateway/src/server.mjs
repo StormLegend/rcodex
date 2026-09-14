@@ -1,4 +1,5 @@
 import http from "node:http";
+import { createAttachmentStore } from "./attachments.mjs";
 import { createCaptchaStore, isAuthorized, validateCredentials } from "./auth.mjs";
 import { renderConsoleHtml } from "./console.mjs";
 import { createEventBus } from "./events.mjs";
@@ -23,7 +24,8 @@ export function createGatewayServer({ config, logger }) {
   const store = createSessionStore({ dataDir: config.dataDir });
   store.load();
   const files = createFilesystem({ allowedPaths: config.allowedPaths });
-  const sessions = createSessionManager({ config, store, bus, logger });
+  const attachments = createAttachmentStore({ files });
+  const sessions = createSessionManager({ config, store, bus, logger, attachmentStore: attachments });
 
   async function handlePublic(req, res, pathname) {
     if (req.method === "GET" && pathname === "/health") {
@@ -68,7 +70,13 @@ export function createGatewayServer({ config, logger }) {
       return true;
     }
     if (req.method === "GET" && pathname === "/version") {
-      sendJson(res, 200, { name: config.name, version: config.version, models: config.codexModels });
+      sendJson(res, 200, {
+        name: config.name,
+        version: config.version,
+        models: config.codexModels,
+        defaultModelProvider: config.codexDefaultProvider,
+        providers: config.codexProviders ?? [],
+      });
       return true;
     }
     return false;
@@ -85,6 +93,7 @@ export function createGatewayServer({ config, logger }) {
         workspacePath: body.workspacePath,
         prompt: body.prompt,
         model: body.model,
+        modelProvider: body.modelProvider,
         reasoningEffort: body.reasoningEffort,
         title: body.title,
         permissionMode: body.permissionMode,
@@ -92,10 +101,50 @@ export function createGatewayServer({ config, logger }) {
       sendJson(res, 201, { session });
       return true;
     }
+    if (req.method === "GET" && pathname === "/usage") {
+      const sessions = store.list();
+      const totals = sessions.reduce((result, session) => {
+        const usage = session.usage ?? {};
+        const total = usage.total ?? usage;
+        for (const key of ["inputTokens", "outputTokens", "cachedInputTokens", "reasoningTokens", "totalTokens"]) {
+          const value = Number(total?.[key] ?? usage?.[key] ?? 0);
+          if (Number.isFinite(value)) result[key] = (result[key] ?? 0) + value;
+        }
+        return result;
+      }, {});
+      sendJson(res, 200, { sessions: sessions.map(({ id, title, usage }) => ({ id, title, usage })), totals });
+      return true;
+    }
+    const resumeSessionId = matchSessionChild(pathname, "/resume");
+    if (req.method === "POST" && resumeSessionId) {
+      sendJson(res, 200, { session: await sessions.resumeSession(resumeSessionId) });
+      return true;
+    }
+    const runtimeConfigSessionId = matchSessionChild(pathname, "/runtime-config");
+    if (req.method === "PUT" && runtimeConfigSessionId) {
+      const body = await readJsonBody(req);
+      sendJson(res, 200, { session: await sessions.updateRuntimeConfig(runtimeConfigSessionId, body) });
+      return true;
+    }
+    const attachmentSessionId = matchSessionChild(pathname, "/attachments");
+    if (req.method === "POST" && attachmentSessionId) {
+      const body = await readJsonBody(req, { limitBytes: 16 * 1024 * 1024 });
+      sendJson(res, 201, { attachment: await sessions.addAttachment(attachmentSessionId, body) });
+      return true;
+    }
+    if (req.method === "GET" && attachmentSessionId) {
+      const session = store.get(attachmentSessionId);
+      if (!session) {
+        sendError(res, 404, "session not found", "not_found");
+        return true;
+      }
+      sendJson(res, 200, { attachments: session.attachments ?? [] });
+      return true;
+    }
     const turnSessionId = matchSessionChild(pathname, "/turns");
     if (req.method === "POST" && turnSessionId) {
       const body = await readJsonBody(req);
-      const session = await sessions.runTurn(turnSessionId, body.prompt);
+      const session = await sessions.runTurn(turnSessionId, body.prompt, Array.isArray(body.attachmentIds) ? body.attachmentIds.map(String) : []);
       sendJson(res, 200, { session });
       return true;
     }

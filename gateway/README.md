@@ -24,8 +24,19 @@ node src/cli.mjs start
 配置也可以放在 env 文件里（`RCODEX_GATEWAY_ENV=/path/to/gateway.env`），变量名与官方网关一致：
 `GATEWAY_HOST`、`GATEWAY_PORT`、`GATEWAY_NAME`、`GATEWAY_DATA_DIR`、`GATEWAY_ALLOWED_PATHS`、
 `GATEWAY_AUTH_USERNAME`、`GATEWAY_AUTH_PASSWORD`、`GATEWAY_AUTH_TOKEN`、`CODEX_COMMAND`、
-`CODEX_AVAILABLE_MODELS`、`CODEX_APP_SERVER_STARTUP_TIMEOUT_MS`。
+`CODEX_AVAILABLE_MODELS`、`CODEX_DEFAULT_MODEL_PROVIDER`、`CODEX_MODEL_PROVIDERS`、
+`CODEX_APP_SERVER_STARTUP_TIMEOUT_MS`。
 凭据为空时进程拒绝启动（fail closed）。
+
+`CODEX_MODEL_PROVIDERS` 使用 JSON 配置会话可选 Provider 和模型，例如：
+
+```bash
+export CODEX_DEFAULT_MODEL_PROVIDER=deepseek
+export CODEX_MODEL_PROVIDERS='{"deepseek":["deepseek-flash","deepseek-v4-pro"],"custom":["gpt-5.6-sol"]}'
+```
+
+Provider 在 `thread/start` / `thread/resume` 时绑定到会话；同一会话可以继续切换模型，
+但不能直接切换 Provider。跨 Provider 请创建新会话。
 
 ## 已实现的接口
 
@@ -39,6 +50,10 @@ node src/cli.mjs start
 | POST | `/sessions` | 新建会话并发出第一轮（`workspacePath`、`prompt`、`model`、`reasoningEffort`） |
 | GET/DELETE | `/sessions/:id` | 会话详情 / 删除 |
 | POST | `/sessions/:id/turns` | 追加一轮 |
+| POST | `/sessions/:id/resume` | 恢复持久化的 Codex thread |
+| PUT | `/sessions/:id/runtime-config` | 修改会话模型、推理强度和 service tier |
+| POST | `/sessions/:id/attachments` | 上传 base64 附件到会话工作区 |
+| GET | `/sessions/:id/attachments` | 列出会话附件 |
 | POST | `/sessions/:id/interrupt` | 打断当前轮次 |
 | GET | `/sessions/:id/requests` | 当前等待人工处理的审批 / 提问 |
 | POST | `/sessions/:id/approvals/:requestId` | 审批回执 `{"decision":"approve"｜"deny"}` |
@@ -47,9 +62,14 @@ node src/cli.mjs start
 | GET | `/filesystem/roots` | 允许访问的根目录 |
 | GET | `/filesystem/list?path=` | 列目录 |
 | GET | `/filesystem/read?path=` | 读文件（默认上限 1 MiB，超出截断） |
+| GET | `/usage` | 查看会话与全局 token 用量 |
 
 除 `/health`、`/console`、`/auth/*` 外都需要 `Authorization: Bearer <token>`；SSE 因为
 EventSource 不能带 header，支持 `?token=`。
+
+活跃会话会在网关启动后尝试通过 `thread/resume` 自动恢复；也可以调用
+`POST /sessions/:id/resume` 手动恢复。追加轮次时传入
+`{"prompt":"...","attachmentIds":["..."]}` 即可选择已上传附件。
 
 ## 权限模式（三档，与 rCodex 一致）
 
@@ -72,7 +92,7 @@ EventSource 不能带 header，支持 `?token=`。
 `src/codex-app-server.mjs` 是一个只依赖 Node 内置模块的 JSON-RPC 客户端：
 
 - 帧格式：stdin/stdout 上的换行分隔 JSON
-- 请求：`initialize` → `thread/start` → `turn/start`（另有 `turn/interrupt`）
+- 请求：`initialize` → `thread/start` / `thread/resume` → `turn/start`（另有 `turn/interrupt`、`thread/settings/update`）
 - 通知：`thread/status/changed`、`item/agentMessage/delta`、`item/completed`、`turn/completed`、
   `turn/plan/updated`、`item/commandExecution/outputDelta` 等，原样透传给控制台/App
 - `thread/start` 的 `sandbox` 是字符串（`danger-full-access`），而 `turn/start` 的
@@ -90,7 +110,7 @@ EventSource 不能带 header，支持 `?token=`。
 ## 测试
 
 ```bash
-npm test                                    # 10 个用例：配置、鉴权、文件、端到端会话流程
+npm test                                    # 19 个用例：配置、鉴权、文件、端到端会话流程
 RCODEX_SMOKE=1 CODEX_COMMAND=/path/to/rcodex-codex \
   node test/smoke-live.mjs /tmp/workspace "只回复两个字：收到"   # 实弹冒烟（需要真实 Codex）
 ```

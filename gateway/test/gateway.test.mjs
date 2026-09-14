@@ -32,6 +32,11 @@ function setup() {
     allowedPaths: [workspace],
     codexCommand: wrapper,
     codexModels: ["deepseek-flash"],
+    codexDefaultProvider: "deepseek",
+    codexProviders: [
+      { provider: "deepseek", models: ["deepseek-flash"] },
+      { provider: "custom", models: ["gpt-5.6-sol"] },
+    ],
     codexAppServerStartupTimeoutMs: 15000,
     authUsername: "admin",
     authPassword: "secret",
@@ -92,6 +97,7 @@ test("auth is enforced, files are listable, and a session runs to completion", a
     const { session } = await createResponse.json();
     assert.equal(session.status, "running");
     assert.equal(session.provider, "codex");
+    assert.equal(session.modelProvider, "deepseek");
 
     await new Promise((resolve) => setTimeout(resolve, 250));
     const detail = await (await fetch(`${base}/sessions/${session.id}`, { headers: authHeaders })).json();
@@ -271,5 +277,128 @@ test("auto and full modes never wait for a human", async () => {
     } finally {
       await gateway.close();
     }
+  }
+});
+
+test("runtime configuration and token usage are persisted and exposed", async () => {
+  const { gateway, workspace } = setup();
+  const base = await listen(gateway);
+  try {
+    const token = await login(base, gateway);
+    const headers = { "Content-Type": "application/json", Authorization: `Bearer ${token}` };
+    const created = await fetch(`${base}/sessions`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ workspacePath: workspace, prompt: "usage" }),
+    });
+    const { session } = await created.json();
+    await waitFor(async () => (await (await fetch(`${base}/sessions/${session.id}`, { headers })).json()).session.status === "completed");
+
+    const changed = await fetch(`${base}/sessions/${session.id}/runtime-config`, {
+      method: "PUT",
+      headers,
+      body: JSON.stringify({ model: "deepseek-v4-pro", reasoningEffort: "high" }),
+    });
+    assert.equal(changed.status, 200);
+    const changedSession = (await changed.json()).session;
+    assert.equal(changedSession.modelOverride, "deepseek-v4-pro");
+    assert.equal(changedSession.reasoningEffort, "high");
+
+    const usage = await (await fetch(`${base}/usage`, { headers })).json();
+    assert.equal(usage.totals.totalTokens, 19);
+    assert.equal(usage.sessions[0].usage.total.outputTokens, 7);
+  } finally {
+    await gateway.close();
+  }
+});
+
+test("attachments are stored inside the workspace and can be selected for a turn", async () => {
+  const { gateway, workspace } = setup();
+  const base = await listen(gateway);
+  try {
+    const token = await login(base, gateway);
+    const headers = { "Content-Type": "application/json", Authorization: `Bearer ${token}` };
+    const created = await fetch(`${base}/sessions`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ workspacePath: workspace, prompt: "attachment session" }),
+    });
+    const { session } = await created.json();
+    const uploaded = await fetch(`${base}/sessions/${session.id}/attachments`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ name: "note.txt", mimeType: "text/plain", data: Buffer.from("attached text").toString("base64") }),
+    });
+    assert.equal(uploaded.status, 201);
+    const attachment = (await uploaded.json()).attachment;
+    assert.equal(attachment.name, "note.txt");
+    assert.equal(attachment.size, 13);
+    assert.ok(attachment.relativePath.startsWith(`.rcodex/attachments/${session.id}/`));
+    assert.ok(fs.existsSync(path.join(workspace, attachment.relativePath)));
+
+    const listed = await (await fetch(`${base}/sessions/${session.id}/attachments`, { headers })).json();
+    assert.equal(listed.attachments.length, 1);
+    const turn = await fetch(`${base}/sessions/${session.id}/turns`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ prompt: "use it", attachmentIds: [attachment.id] }),
+    });
+    assert.equal(turn.status, 200);
+  } finally {
+    await gateway.close();
+  }
+});
+
+test("persisted active sessions can be resumed after a gateway restart", async () => {
+  const { gateway, config, workspace } = setup();
+  const session = gateway.store.upsert({
+    id: "persisted-session",
+    provider: "codex",
+    providerSessionId: "thread-fake-1",
+    workspacePath: workspace,
+    permissionMode: "full",
+    modelOverride: "deepseek-flash",
+    status: "running",
+    resumeStatus: "resumable",
+    createdAt: new Date().toISOString(),
+    lastUpdatedAt: new Date().toISOString(),
+  });
+  try {
+    const resumed = await gateway.sessions.resumePersistedSessions();
+    assert.equal(resumed.length, 1);
+    assert.equal(resumed[0].id, session.id);
+    assert.equal(resumed[0].resumeStatus, "resumed");
+    assert.equal(gateway.store.get(session.id).status, "running");
+  } finally {
+    await gateway.close();
+  }
+  assert.equal(config.codexCommand.endsWith("fake-codex"), true);
+});
+
+test("different sessions can bind different Codex model providers", async () => {
+  const { gateway, workspace } = setup();
+  const base = await listen(gateway);
+  try {
+    const token = await login(base, gateway);
+    const headers = { "Content-Type": "application/json", Authorization: `Bearer ${token}` };
+    const make = (modelProvider, model) => fetch(`${base}/sessions`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ workspacePath: workspace, prompt: `${modelProvider} session`, modelProvider, model }),
+    });
+    const deepseek = await (await make("deepseek", "deepseek-flash")).json();
+    const custom = await (await make("custom", "gpt-5.6-sol")).json();
+    assert.equal(deepseek.session.modelProvider, "deepseek");
+    assert.equal(custom.session.modelProvider, "custom");
+
+    const rejected = await fetch(`${base}/sessions/${deepseek.session.id}/runtime-config`, {
+      method: "PUT",
+      headers,
+      body: JSON.stringify({ modelProvider: "custom", model: "gpt-5.6-sol" }),
+    });
+    assert.equal(rejected.status, 409);
+    assert.equal((await rejected.json()).error, "model_provider_immutable");
+  } finally {
+    await gateway.close();
   }
 });

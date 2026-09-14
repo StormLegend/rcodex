@@ -13,10 +13,20 @@ web_search = "disabled"
 
 [model_providers.custom]
 name = "custom"
-base_url = "https://api.deepseek.com/"     # 想走预算闸就改成 http://127.0.0.1:8788/
+base_url = "https://api.deepseek.com/"
 wire_api = "responses"
 experimental_bearer_token = "sk-..."
 ```
+
+网关可以让不同会话使用不同的 Codex Provider。启动网关时声明可选 Provider 与模型：
+
+```bash
+export CODEX_DEFAULT_MODEL_PROVIDER=deepseek
+export CODEX_MODEL_PROVIDERS='{"deepseek":["deepseek-flash","deepseek-v4-pro"],"custom":["gpt-5.6-sol"]}'
+```
+
+创建会话时传 `modelProvider` 和 `model`。Provider 会绑定在 Codex thread 上；同一会话可切换模型，
+但不能直接跨 Provider 切换，跨 Provider 应创建新会话。API 只读取 Provider 名称，不会把密钥返回给客户端。
 
 `~/.codex/auth.json` 里放同一把 key：
 

@@ -36,3 +36,21 @@ test("loadConfig reads an env file and resolves allowed paths", () => {
   assert.deepEqual(config.allowedPaths, [workspace]);
   assert.deepEqual(config.codexModels, ["deepseek-flash", "deepseek-v4-pro"]);
 });
+
+test("loadConfig parses per-provider model catalogs and defaults to the first provider", () => {
+  const config = loadConfig({
+    env: {
+      GATEWAY_AUTH_PASSWORD: "secret",
+      GATEWAY_AUTH_TOKEN: "token",
+      CODEX_MODEL_PROVIDERS: JSON.stringify({
+        deepseek: ["deepseek-flash", "deepseek-v4-pro"],
+        custom: ["gpt-5.6-sol"],
+      }),
+    },
+  });
+  assert.equal(config.codexDefaultProvider, "deepseek");
+  assert.deepEqual(config.codexProviders, [
+    { provider: "deepseek", models: ["deepseek-flash", "deepseek-v4-pro"] },
+    { provider: "custom", models: ["gpt-5.6-sol"] },
+  ]);
+});
