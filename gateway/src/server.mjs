@@ -88,6 +88,29 @@ export function createGatewayServer({ config, logger }) {
   }
 
   async function handleSessions(req, res, pathname, searchParams) {
+    if (req.method === "GET" && pathname === "/notification-channels") {
+      sendJson(res, 200, { channels: schedules.listChannels() });
+      return true;
+    }
+    if (req.method === "POST" && pathname === "/notification-channels/webhook") {
+      const body = await readJsonBody(req);
+      sendJson(res, 201, { channel: await schedules.createChannel(body) });
+      return true;
+    }
+    const notificationTest = pathname.match(/^\/notification-channels\/([^/]+)\/test$/);
+    if (req.method === "POST" && notificationTest) {
+      const result = await schedules.testChannel(decodeURIComponent(notificationTest[1]));
+      if (!result) { sendError(res, 404, "notification channel not found", "not_found"); return true; }
+      sendJson(res, result.ok ? 200 : 502, { result });
+      return true;
+    }
+    const notificationDelete = pathname.match(/^\/notification-channels\/([^/]+)$/);
+    if (req.method === "DELETE" && notificationDelete) {
+      const id = decodeURIComponent(notificationDelete[1]);
+      if (!(await schedules.removeChannel(id))) { sendError(res, 404, "notification channel not found", "not_found"); return true; }
+      sendJson(res, 200, { deleted: true, id });
+      return true;
+    }
     if (req.method === "GET" && pathname === "/importable-threads") {
       sendJson(res, 200, { threads: await sessions.listImportableThreads(searchParams?.get("limit")) });
       return true;

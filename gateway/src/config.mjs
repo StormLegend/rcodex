@@ -85,7 +85,7 @@ export function loadConfig({ env = process.env, envFile } = {}) {
     throw error;
   }
   const config = {
-    version: "0.3.0",
+    version: "0.4.0",
     name: get("GATEWAY_NAME", "rcodex-gateway"),
     host: get("GATEWAY_HOST", "127.0.0.1"),
     port: Number(get("GATEWAY_PORT", "8787")),

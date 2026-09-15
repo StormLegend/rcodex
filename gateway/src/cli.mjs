@@ -8,7 +8,7 @@ import { createLogger } from "./logger.mjs";
 import { createGatewayServer } from "./server.mjs";
 import { generateServiceUnit, runSetup } from "./setup.mjs";
 
-const VERSION = "0.3.0";
+const VERSION = "0.4.0";
 const home = os.homedir();
 const defaultEnvFile = path.join(home, ".rcodex", "gateway", "gateway.env");
 

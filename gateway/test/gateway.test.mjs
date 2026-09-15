@@ -500,6 +500,22 @@ test("schedules persist, can be paused/resumed, and start a session on demand", 
   }
 });
 
+test("cron schedules are accepted and webhook channels can be attached", async () => {
+  const { gateway, workspace } = setup();
+  const base = await listen(gateway);
+  try {
+    const token = await login(base, gateway);
+    const headers = { "Content-Type": "application/json", Authorization: `Bearer ${token}` };
+    const channel = await (await fetch(`${base}/notification-channels/webhook`, { method: "POST", headers, body: JSON.stringify({ name: "local", url: "http://127.0.0.1:9/hook" }) })).json();
+    assert.equal(channel.channel.type, "webhook");
+    const schedule = await (await fetch(`${base}/schedules`, { method: "POST", headers, body: JSON.stringify({ name: "cron", prompt: "run", workspacePath: workspace, notificationChannelIds: [channel.channel.id], trigger: { type: "cron", expression: "*/5 * * * *", timezone: "Asia/Shanghai" } }) })).json();
+    assert.equal(schedule.schedule.trigger.type, "cron");
+    assert.ok(schedule.schedule.nextRunAt);
+    const channels = await (await fetch(`${base}/notification-channels`, { headers })).json();
+    assert.equal(channels.channels.length, 1);
+  } finally { await gateway.close(); }
+});
+
 test("historical Codex threads can be listed and imported as replayable sessions", async () => {
   const { gateway, workspace } = setup();
   const base = await listen(gateway);

@@ -90,6 +90,10 @@ Provider 在 `thread/start` / `thread/resume` 时绑定到会话；同一会话�
 | POST | `/schedules/:id/resume` | 恢复任务 |
 | POST | `/schedules/:id/run` | 立即执行一次任务 |
 | DELETE | `/schedules/:id` | 删除任务 |
+| GET | `/notification-channels` | 列出通知渠道 |
+| POST | `/notification-channels/webhook` | 创建 Webhook 通知渠道 |
+| POST | `/notification-channels/:id/test` | 测试 Webhook 通知渠道 |
+| DELETE | `/notification-channels/:id` | 删除通知渠道 |
 | GET | `/importable-threads` | 列出当前 Codex 可导入的历史 thread |
 | POST | `/sessions/import` | 按 threadId 导入历史会话 |
 
@@ -142,7 +146,7 @@ EventSource 不能带 header，支持 `?token=`。
 ## 测试
 
 ```bash
-npm test                                    # 26 个用例：配置、鉴权、文件、端到端会话流程
+npm test                                    # 28 个用例：配置、鉴权、文件、端到端会话流程
 RCODEX_SMOKE=1 CODEX_COMMAND=/path/to/rcodex-codex \
   node test/smoke-live.mjs /tmp/workspace "只回复两个字：收到"   # 实弹冒烟（需要真实 Codex）
 ```
