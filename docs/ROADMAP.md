@@ -8,7 +8,7 @@
 - [x] 事件：SSE（历史回放 + 增量 + 保活），原样透传 app-server 通知
 - [x] 文件：白名单根目录、`realpath` 防越界、列目录、读文件（带截断）
 - [x] 控制台：登录、会话列表、流式输出、发消息
-- [x] 测试：26 个单元/集成用例 + 真实 `codex app-server` 实弹冒烟
+- [x] 测试：27 个单元/集成用例 + 真实 `codex app-server` 实弹冒烟
 
 ## Phase 1 —— 达到"日常可用"
 
@@ -21,7 +21,7 @@
 - [x] 提问回执：`session-question` 事件 + 控制台选项/输入框 + `POST /sessions/:id/questions/:requestId`
 - [x] 会话恢复：网关重启后 `thread/resume` 挂回运行中的线程
 - [x] 附件：上传（`/sessions/:id/attachments`），图片输入块和安全工作区存储
-- [ ] 目录/文件变更视图：`turn/diff/updated` 渲染为可读 diff
+- [x] 目录/文件变更视图基础接口：工作区 Git 状态和 diff；事件渲染待增强
 - [x] 模型与推理强度切换：`thread/settings/update` + 每会话记忆
 - [x] 会话级 Codex Provider/模型选择：`modelProvider` 绑定到 `thread/start` / `thread/resume`
 - [x] token 用量：`thread/tokenUsage/updated` 聚合到会话与全局
@@ -33,7 +33,8 @@
 - [ ] 定时任务增强（cron 表达式、投递目标、失败重试）
 - [ ] 通知渠道（webhook / Telegram / 飞书 / 企业微信）
 - [ ] 子 Agent 与线程树（`thread/fork`、subagent 事件聚合）
-- [ ] 历史导入（`thread/import`、`thread/items/list`、`thread/read`）
+- [x] 历史导入基础能力（`thread/list`、`thread/import`、`thread/items/list`、`thread/read`）
+- [ ] 历史导入增强（异步批量导入、完整分页、远端历史一致性）
 - [ ] 多 profile（一套进程托管多个 `HERMES_HOME` 式的隔离环境）
 
 ## Phase 3 —— 分发与生态

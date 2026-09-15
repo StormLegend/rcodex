@@ -336,6 +336,10 @@ test("attachments are stored inside the workspace and can be selected for a turn
     assert.ok(attachment.relativePath.startsWith(`.rcodex/attachments/${session.id}/`));
     assert.ok(fs.existsSync(path.join(workspace, attachment.relativePath)));
 
+    const download = await fetch(`${base}/sessions/${session.id}/attachments/${attachment.id}`, { headers: { Authorization: `Bearer ${token}` } });
+    assert.equal(download.status, 200);
+    assert.equal(await download.text(), "attached text");
+
     const listed = await (await fetch(`${base}/sessions/${session.id}/attachments`, { headers })).json();
     assert.equal(listed.attachments.length, 1);
     const turn = await fetch(`${base}/sessions/${session.id}/turns`, {
@@ -491,6 +495,30 @@ test("schedules persist, can be paused/resumed, and start a session on demand", 
     assert.ok(runBody.run.sessionId);
     const runs = await (await fetch(`${base}/schedule-runs?scheduleId=${encodeURIComponent(schedule.id)}`, { headers })).json();
     assert.equal(runs.runs.length, 1);
+  } finally {
+    await gateway.close();
+  }
+});
+
+test("historical Codex threads can be listed and imported as replayable sessions", async () => {
+  const { gateway, workspace } = setup();
+  const base = await listen(gateway);
+  try {
+    const token = await login(base, gateway);
+    const headers = { Authorization: `Bearer ${token}` };
+    const available = await (await fetch(`${base}/importable-threads`, { headers })).json();
+    assert.equal(available.threads[0].id, "thread-import-1");
+    const imported = await fetch(`${base}/sessions/import`, {
+      method: "POST",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify({ threadId: "thread-import-1", title: "导入的历史" }),
+    });
+    assert.equal(imported.status, 200);
+    const session = (await imported.json()).session;
+    assert.equal(session.title, "导入的历史");
+    assert.equal(session.status, "completed");
+    assert.ok(gateway.bus.history(session.id).some((entry) => entry.payload?.text === "旧回答"));
+    assert.equal(session.canResume, false, "an unapproved imported cwd must stay history-only");
   } finally {
     await gateway.close();
   }

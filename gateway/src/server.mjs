@@ -88,6 +88,15 @@ export function createGatewayServer({ config, logger }) {
   }
 
   async function handleSessions(req, res, pathname, searchParams) {
+    if (req.method === "GET" && pathname === "/importable-threads") {
+      sendJson(res, 200, { threads: await sessions.listImportableThreads(searchParams?.get("limit")) });
+      return true;
+    }
+    if (req.method === "POST" && pathname === "/sessions/import") {
+      const body = await readJsonBody(req);
+      sendJson(res, 200, { session: await sessions.importSession(body.threadId, body.title) });
+      return true;
+    }
     if (req.method === "GET" && pathname === "/sessions") {
       sendJson(res, 200, { sessions: store.list() });
       return true;
@@ -202,6 +211,19 @@ export function createGatewayServer({ config, logger }) {
     if (req.method === "POST" && attachmentSessionId) {
       const body = await readJsonBody(req, { limitBytes: 16 * 1024 * 1024 });
       sendJson(res, 201, { attachment: await sessions.addAttachment(attachmentSessionId, body) });
+      return true;
+    }
+    const attachmentDownload = matchSessionAction(pathname, "attachments");
+    if (req.method === "GET" && attachmentDownload) {
+      const attachment = await sessions.readAttachment(attachmentDownload.sessionId, attachmentDownload.requestId);
+      const inline = attachment.mimeType?.startsWith("image/") || searchParams?.get("inline") === "1";
+      res.writeHead(200, {
+        "Content-Type": attachment.mimeType || "application/octet-stream",
+        "Content-Length": attachment.data.length,
+        "Content-Disposition": `${inline ? "inline" : "attachment"}; filename="${attachment.name}"`,
+        "Cache-Control": "private, max-age=300",
+      });
+      res.end(attachment.data);
       return true;
     }
     if (req.method === "GET" && attachmentSessionId) {

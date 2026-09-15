@@ -53,6 +53,7 @@ export function renderConsoleHtml({ gatewayName, version }) {
     <div class="row">
       <input id="workspace" style="flex:1" placeholder="工作目录"/>
       <button onclick="createSession()">新建</button>
+      <button class="secondary" onclick="importThreads()" title="导入历史会话">导入</button>
     </div>
     <div class="row">
       <select id="modelProvider" title="Provider"></select>
@@ -63,6 +64,7 @@ export function renderConsoleHtml({ gatewayName, version }) {
       </select>
     </div>
     <div id="sessions"></div>
+    <div id="sessionAttachments" class="muted" style="margin-top:12px"></div>
   </aside>
   <section id="detail">
     <div id="log" class="muted">选择一个会话，或在左上角新建。</div>
@@ -259,12 +261,22 @@ function openSession(id) {
   currentSession = id;
   document.getElementById("log").innerHTML = "";
   document.getElementById("pending").innerHTML = "";
+  document.getElementById("sessionAttachments").innerHTML = "";
   document.getElementById("log").classList.remove("muted");
   if (stream) stream.close();
   api("/sessions/" + encodeURIComponent(id)).then(({ session }) => {
     if (session.modelProvider) document.getElementById("modelProvider").value = session.modelProvider;
     if (session.modelOverride) document.getElementById("model").value = session.modelOverride;
     if (session.reasoningEffort) document.getElementById("reasoning").value = session.reasoningEffort;
+    const attachments = document.getElementById("sessionAttachments");
+    for (const item of session.attachments || []) {
+      const link = document.createElement("a");
+      link.href = "/sessions/" + encodeURIComponent(id) + "/attachments/" + encodeURIComponent(item.id) + "?token=" + encodeURIComponent(token) + (item.mimeType?.startsWith("image/") ? "&inline=1" : "");
+      link.textContent = item.name;
+      link.target = "_blank";
+      link.style.display = "block";
+      attachments.appendChild(link);
+    }
   }).catch(() => {});
   stream = new EventSource("/sessions/" + encodeURIComponent(id) + "/events?token=" + encodeURIComponent(token));
   stream.onmessage = (event) => {
@@ -292,6 +304,21 @@ async function createSession() {
   document.getElementById("prompt").value = "";
   await loadSessions();
   openSession(data.session.id);
+}
+
+async function importThreads() {
+  const data = await api("/importable-threads?limit=30");
+  if (!(data.threads || []).length) {
+    alert("没有可导入的历史会话");
+    return;
+  }
+  const lines = data.threads.map((item, index) => (index + 1) + ". " + (item.preview || item.id) + " [" + (item.modelProvider || "codex") + "/" + (item.model || "default") + "]");
+  const selected = Number(window.prompt("输入要导入的序号：\n" + lines.join("\n"), "1"));
+  const item = data.threads[selected - 1];
+  if (!item) return;
+  const imported = await api("/sessions/import", { method: "POST", body: JSON.stringify({ threadId: item.id }) });
+  await loadSessions();
+  openSession(imported.session.id);
 }
 
 async function applyRuntimeConfig() {

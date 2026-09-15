@@ -169,6 +169,27 @@ export class CodexAppServer {
     return response?.thread ?? response;
   }
 
+  async listThreads(limit = 500) {
+    const threads = [];
+    let cursor;
+    do {
+      const response = await this.request("thread/list", { cursor, limit: Math.min(200, limit - threads.length), archived: false, modelProviders: [] });
+      threads.push(...(response?.data ?? []));
+      cursor = response?.nextCursor ?? null;
+    } while (cursor && threads.length < limit);
+    return threads.slice(0, limit);
+  }
+
+  async readThread(threadId) {
+    const response = await this.request("thread/read", { threadId, includeTurns: true });
+    return response?.thread ?? response;
+  }
+
+  async listThreadItems(threadId, limit = 500) {
+    const response = await this.request("thread/items/list", { threadId, limit: Math.min(500, limit), sortDirection: "asc" });
+    return response?.data ?? [];
+  }
+
   async resumeThread(options = {}) {
     const response = await this.request("thread/resume", {
       threadId: options.threadId,

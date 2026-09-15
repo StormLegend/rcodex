@@ -28,6 +28,9 @@ node src/cli.mjs setup --yes --install-service
 node src/cli.mjs service start
 ```
 
+已安装用户可执行 `node src/cli.mjs config` 查看脱敏后的生效配置，或用
+`node src/cli.mjs service status` 检查后台服务。
+
 向导会读取 `~/.codex/config.toml`，发现 Provider、默认模型和可用的 `env_key`，尝试从各 Provider
 的 `/models` 接口获取模型目录，生成 `~/.rcodex/gateway/gateway.env`，并创建用户级 systemd 服务。
 API key 只由 Codex 的环境变量读取，不会写入 Gateway 配置或返回给浏览器。没有网络时可加
@@ -69,6 +72,7 @@ Provider 在 `thread/start` / `thread/resume` 时绑定到会话；同一会话�
 | PUT | `/sessions/:id/runtime-config` | 修改会话模型、推理强度和 service tier |
 | POST | `/sessions/:id/attachments` | 上传 base64 附件到会话工作区 |
 | GET | `/sessions/:id/attachments` | 列出会话附件 |
+| GET | `/sessions/:id/attachments/:attachmentId` | 下载附件；图片可用 `?inline=1` 内联预览 |
 | POST | `/sessions/:id/interrupt` | 打断当前轮次 |
 | GET | `/sessions/:id/requests` | 当前等待人工处理的审批 / 提问 |
 | POST | `/sessions/:id/approvals/:requestId` | 审批回执 `{"decision":"approve"｜"deny"}` |
@@ -86,6 +90,8 @@ Provider 在 `thread/start` / `thread/resume` 时绑定到会话；同一会话�
 | POST | `/schedules/:id/resume` | 恢复任务 |
 | POST | `/schedules/:id/run` | 立即执行一次任务 |
 | DELETE | `/schedules/:id` | 删除任务 |
+| GET | `/importable-threads` | 列出当前 Codex 可导入的历史 thread |
+| POST | `/sessions/import` | 按 threadId 导入历史会话 |
 
 `/healthz` 是 `/health` 的兼容别名，`/api/usage/summary` 是 `/usage` 的兼容别名。
 事件历史会持久化到 `GATEWAY_DATA_DIR/events/`，SSE 可用 `?limit=200` 控制首批回放数量。

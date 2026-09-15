@@ -22,7 +22,7 @@ node src/cli.mjs service start
 向导会自动读取本机 Codex Provider 配置，并尝试发现各 Provider 的模型列表。也可以从仓库根目录直接执行 `./install-open.sh`，它会检查 Node.js、生成配置、创建并启用用户级服务。
 
 ```bash
-cd gateway && npm test                      # 26/26 通过（含端到端会话流程）
+cd gateway && npm test                      # 27/27 通过（含端到端会话流程）
 RCODEX_SMOKE=1 CODEX_COMMAND=/path/to/rcodex-codex \
   node test/smoke-live.mjs /tmp/ws "只回复两个字：收到"   # 实弹：需要真实 Codex
 ```

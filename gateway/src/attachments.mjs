@@ -71,5 +71,17 @@ export function createAttachmentStore({ files, maxBytes = DEFAULT_MAX_BYTES } = 
     return { ...withPath, content: data.subarray(0, MAX_PROMPT_BYTES).toString("utf8") };
   }
 
-  return { store, promptAttachment, maxBytes };
+  async function read(session, attachment) {
+    const target = path.resolve(session.workspacePath, attachment.relativePath);
+    const resolved = await files.resolveAllowed(target);
+    if (resolved.path !== target) {
+      const error = new Error("attachment path is outside the allowed roots");
+      error.statusCode = 403;
+      error.code = "forbidden";
+      throw error;
+    }
+    return { ...attachment, data: await fs.readFile(target) };
+  }
+
+  return { store, promptAttachment, read, maxBytes };
 }

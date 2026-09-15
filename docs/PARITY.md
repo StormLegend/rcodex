@@ -10,7 +10,7 @@
 | Provider/模型/推理强度 | 已完成 | 必须 | Provider 绑定 thread；模型和推理强度可运行时调整 |
 | SSE 事件流 | 已完成 | 必须 | 最近窗口持久化到 JSONL，支持首批回放 limit |
 | thread fork / turn steer | 已完成 | 高 | 分支上下文和活动轮次追加指令 |
-| 附件与图片 | 已完成基础版 | 高 | JSON base64 上传、工作区安全存储、图片输入；multipart/下载待增强 |
+| 附件与图片 | 已完成基础版 | 高 | JSON base64 上传、下载/inline 预览、工作区安全存储、图片输入；multipart 待增强 |
 | Token 用量 | 已完成基础版 | 高 | 会话和全局累计；价格/账单不属于网关职责 |
 | 工作区文件浏览 | 已完成 | 必须 | realpath 白名单校验和读取上限 |
 | 工作区 Git 状态/diff | 已完成基础版 | 高 | `/changes`、`/changes/diff`；后续渲染 `turn/diff/updated` 事件 |
@@ -18,7 +18,7 @@
 | 定时任务 cron/通知投递/失败重试 | 未完成 | 中 | 下一阶段独立编排子系统 |
 | 通知渠道（iLink/飞书等） | 未完成 | 中 | 计划使用隔离插件接口，不把第三方 SDK 塞进核心进程 |
 | 插件/MCP/Skills 管理 | 未完成 | 中 | 需要权限、安装和生命周期边界设计 |
-| 历史导入与完整分页 | 部分完成 | 高 | 当前保留会话元数据和最近事件；导入/远端历史待实现 |
+| 历史导入与完整分页 | 已完成基础版 | 高 | `thread/list`、`thread/read`、`thread/items/list` 导入和最近事件回放；完整远端分页待增强 |
 | WebSocket Console 通道 | 未完成 | 中 | SSE 已够用；需要 App 兼容性测试后再引入 |
 | QR 配对 | 未完成 | 低 | 先稳定 Bearer + 反向代理部署 |
 | Claude Code Runtime | 未完成 | 中 | 应作为独立后端，不伪装成 Codex Provider |

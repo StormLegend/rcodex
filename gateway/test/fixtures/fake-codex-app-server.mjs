@@ -60,6 +60,23 @@ lines.on("line", (line) => {
     send({ jsonrpc: "2.0", id, result: { userAgent: "fake-codex-app-server/1.0" } });
     return;
   }
+  if (method === "thread/list") {
+    send({ jsonrpc: "2.0", id, result: { data: [
+      { id: "thread-import-1", preview: "历史任务", cwd: process.cwd(), model: "deepseek-flash", modelProvider: "deepseek", createdAt: 1_700_000_000, updatedAt: 1_700_000_100 },
+    ], nextCursor: null } });
+    return;
+  }
+  if (method === "thread/read") {
+    send({ jsonrpc: "2.0", id, result: { thread: { id: params?.threadId, preview: "历史任务", cwd: process.cwd(), model: "deepseek-flash", modelProvider: "deepseek", createdAt: 1_700_000_000, updatedAt: 1_700_000_100 } } });
+    return;
+  }
+  if (method === "thread/items/list") {
+    send({ jsonrpc: "2.0", id, result: { data: [
+      { id: "old-user", type: "userMessage", text: "旧问题", createdAt: 1_700_000_010 },
+      { id: "old-agent", type: "agentMessage", text: "旧回答", createdAt: 1_700_000_020 },
+    ], nextCursor: null } });
+    return;
+  }
   if (method === "thread/start") {
     approvalPolicy = params?.approvalPolicy ?? "never";
     modelProvider = params?.modelProvider ?? "custom";

@@ -46,6 +46,18 @@ function normalizeModelProvider(value) {
   return provider;
 }
 
+function timestampFromThread(value, fallback = nowIso()) {
+  if (typeof value === "number" && Number.isFinite(value)) return new Date(value < 10_000_000_000 ? value * 1000 : value).toISOString();
+  const parsed = Date.parse(String(value ?? ""));
+  return Number.isFinite(parsed) ? new Date(parsed).toISOString() : fallback;
+}
+
+function itemText(item) {
+  if (typeof item?.text === "string") return item.text;
+  if (Array.isArray(item?.content)) return item.content.map((part) => part?.text ?? part?.input_text ?? part?.output_text ?? "").join("");
+  return "";
+}
+
 export function createSessionManager({
   config,
   store,
@@ -599,6 +611,106 @@ export function createSessionManager({
     return results;
   }
 
+  async function listImportableThreads(limit = 500) {
+    const client = await ensureAppServer();
+    const existing = new Set(store.list().map((session) => session.providerSessionId).filter(Boolean));
+    const threads = await client.listThreads(Math.max(1, Math.min(1000, Number(limit) || 500)));
+    return threads.filter((thread) => thread?.id && !existing.has(thread.id)).map((thread) => ({
+      id: thread.id,
+      preview: thread.preview ?? thread.title ?? "",
+      cwd: thread.cwd ?? "",
+      model: thread.model,
+      modelProvider: thread.modelProvider,
+      createdAt: timestampFromThread(thread.createdAt),
+      updatedAt: timestampFromThread(thread.updatedAt ?? thread.createdAt),
+    }));
+  }
+
+  async function importSession(threadId, title) {
+    const normalizedThreadId = trimmed(threadId);
+    if (!normalizedThreadId) {
+      const error = new Error("threadId is required");
+      error.statusCode = 400;
+      throw error;
+    }
+    const existing = store.list().find((session) => session.providerSessionId === normalizedThreadId);
+    if (existing) return existing;
+    const client = await ensureAppServer();
+    const [thread, items] = await Promise.all([
+      client.readThread(normalizedThreadId),
+      client.listThreadItems(normalizedThreadId).catch(() => []),
+    ]);
+    if (!thread?.id) {
+      const error = new Error("thread not found");
+      error.statusCode = 404;
+      throw error;
+    }
+    const sessionId = newId();
+    const createdAt = timestampFromThread(thread.createdAt);
+    const updatedAt = timestampFromThread(thread.updatedAt ?? thread.createdAt, createdAt);
+    let workspacePath = config.allowedPaths[0];
+    let canResume = false;
+    try {
+      workspacePath = (await files.resolveAllowed(thread.cwd || config.allowedPaths[0])).path;
+      canResume = true;
+    } catch {
+      // Keep imported history viewable, but never resume into an unapproved path.
+    }
+    const session = {
+      id: sessionId,
+      sessionType: "development",
+      provider: "codex",
+      modelProvider: thread.modelProvider,
+      providerSessionId: thread.id,
+      title: trimmed(title) || trimmed(thread.preview ?? thread.title) || "已导入会话",
+      latestPrompt: trimmed(thread.preview),
+      workspacePath,
+      status: "completed",
+      permissionMode: config.defaultPermissionMode ?? "full",
+      canResume,
+      resumeStatus: canResume ? "resumable" : "history-only",
+      command: `${config.codexCommand} app-server`,
+      args: ["thread/import", "history/replay"],
+      modelOverride: thread.model,
+      modelLabel: thread.model,
+      reasoningEffort: thread.reasoningEffort,
+      createdAt,
+      startedAt: createdAt,
+      lastUpdatedAt: updatedAt,
+      finishedAt: updatedAt,
+      lastTurnFinishedAt: updatedAt,
+      attachments: [],
+    };
+    store.upsert(session);
+    threadToSession.set(thread.id, sessionId);
+    for (const item of items) {
+      const text = itemText(item);
+      const type = String(item?.type ?? "");
+      const timestamp = timestampFromThread(item?.createdAt ?? item?.timestamp, updatedAt);
+      if (/user/i.test(type) && text) bus.emit(sessionId, { type: "session-user-message", timestamp, payload: { sessionId, text } });
+      else if (/agentMessage|assistant/i.test(type) && text) bus.emit(sessionId, { type: "session-message-delta", timestamp, payload: { sessionId, text } });
+      bus.emit(sessionId, { type: "session-output", timestamp, payload: { sessionId, stream: "event", format: "jsonl", eventType: "item/completed", jsonPayload: { threadId: thread.id, item } } });
+    }
+    bus.emit(sessionId, { type: "session-imported", timestamp: updatedAt, payload: { sessionId, session } });
+    return session;
+  }
+
+  async function readAttachment(sessionId, attachmentId) {
+    const session = store.get(sessionId);
+    if (!session) {
+      const error = new Error("session not found");
+      error.statusCode = 404;
+      throw error;
+    }
+    const attachment = (session.attachments ?? []).find((item) => item.id === attachmentId);
+    if (!attachment) {
+      const error = new Error("attachment not found");
+      error.statusCode = 404;
+      throw error;
+    }
+    return attachmentStore.read(session, attachment);
+  }
+
   async function interrupt(sessionId) {
     const session = store.get(sessionId);
     if (!session) {
@@ -668,5 +780,8 @@ export function createSessionManager({
     updateRuntimeConfig,
     resumeSession,
     resumePersistedSessions,
+    listImportableThreads,
+    importSession,
+    readAttachment,
   };
 }
