@@ -88,6 +88,20 @@ export function createGatewayServer({ config, logger }) {
   }
 
   async function handleSessions(req, res, pathname, searchParams) {
+    const extensionMatch = pathname.match(/^\/codex\/extensions\/(skills|plugins|mcp-servers|apps|hooks)$/);
+    if (req.method === "GET" && extensionMatch) {
+      sendJson(res, 200, { kind: extensionMatch[1], items: await sessions.listExtensions(extensionMatch[1], {
+        cwd: searchParams?.get("cwd") || undefined,
+        forceReload: searchParams?.get("forceReload") === "1",
+        forceRefetch: searchParams?.get("forceRefetch") === "1",
+        limit: Number(searchParams?.get("limit") || 500),
+      }) });
+      return true;
+    }
+    if (req.method === "POST" && pathname === "/codex/extensions/mcp-servers/refresh") {
+      sendJson(res, 200, await sessions.refreshMcpServers());
+      return true;
+    }
     if (req.method === "GET" && pathname === "/notification-channels") {
       sendJson(res, 200, { channels: schedules.listChannels() });
       return true;

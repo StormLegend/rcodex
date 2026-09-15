@@ -32,6 +32,7 @@
 - [x] 定时任务基础能力（持久化 once / interval、暂停/恢复、立即执行和运行记录）
 - [x] 定时任务增强（cron 表达式、Webhook 投递、运行记录）
 - [ ] 通知渠道增强（Telegram / 飞书 / 企业微信 / 插件隔离）
+- [x] Codex 扩展只读清单（Skills / Plugins / MCP Server / Apps / Hooks）
 - [ ] 子 Agent 与线程树（`thread/fork`、subagent 事件聚合）
 - [x] 历史导入基础能力（`thread/list`、`thread/import`、`thread/items/list`、`thread/read`）
 - [ ] 历史导入增强（异步批量导入、完整分页、远端历史一致性）

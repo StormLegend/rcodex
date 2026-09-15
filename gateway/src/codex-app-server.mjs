@@ -190,6 +190,35 @@ export class CodexAppServer {
     return response?.data ?? [];
   }
 
+  async listSkills(cwd, forceReload = false) {
+    const response = await this.request("skills/list", { cwds: [cwd], forceReload });
+    return response?.skills ?? response?.data ?? response ?? [];
+  }
+
+  async listPlugins(cwds = [], forceRefetch = false) {
+    const response = await this.request("plugin/list", { cwds, forceRefetch });
+    return response?.plugins ?? response?.data ?? response ?? [];
+  }
+
+  async listMcpServerStatuses(limit = 500) {
+    const response = await this.request("mcpServerStatus/list", { cursor: null, detail: "toolsAndAuthOnly", limit: Math.min(200, limit) });
+    return response?.data ?? response ?? [];
+  }
+
+  async listApps(forceRefetch = false, limit = 500) {
+    const response = await this.request("app/list", { cursor: null, forceRefetch, limit: Math.min(200, limit) });
+    return response?.data ?? response?.apps ?? response ?? [];
+  }
+
+  async listHooks(cwd) {
+    const response = await this.request("hooks/list", { cwds: [cwd] });
+    return response?.hooks ?? response?.data ?? response ?? [];
+  }
+
+  async refreshMcpServers() {
+    return this.request("mcpServer/refresh", {});
+  }
+
   async resumeThread(options = {}) {
     const response = await this.request("thread/resume", {
       threadId: options.threadId,

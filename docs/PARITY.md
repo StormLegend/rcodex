@@ -17,7 +17,7 @@
 | 定时任务 | 已完成基础版 | 中 | 持久化 once/interval、暂停/恢复、立即执行、运行记录 |
 | 定时任务 cron/Webhook 投递 | 已完成基础版 | 中 | 支持五字段 cron 和通用 Webhook；失败重试/第三方渠道待增强 |
 | 通知渠道（Webhook） | 已完成基础版 | 中 | 核心只依赖 HTTP；iLink/飞书等继续走插件隔离 |
-| 插件/MCP/Skills 管理 | 未完成 | 中 | 需要权限、安装和生命周期边界设计 |
+| Plugins/MCP/Skills/Apps/Hooks 只读清单 | 已完成基础版 | 中 | 通过 app-server 读取和刷新状态；安装/启停仍待权限设计 |
 | 历史导入与完整分页 | 已完成基础版 | 高 | `thread/list`、`thread/read`、`thread/items/list` 导入和最近事件回放；完整远端分页待增强 |
 | WebSocket Console 通道 | 未完成 | 中 | SSE 已够用；需要 App 兼容性测试后再引入 |
 | QR 配对 | 未完成 | 低 | 先稳定 Bearer + 反向代理部署 |

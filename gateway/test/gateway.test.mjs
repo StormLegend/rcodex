@@ -539,3 +539,22 @@ test("historical Codex threads can be listed and imported as replayable sessions
     await gateway.close();
   }
 });
+
+test("Codex extension inventory is exposed as authenticated read-only APIs", async () => {
+  const { gateway, workspace } = setup();
+  const base = await listen(gateway);
+  try {
+    const token = await login(base, gateway);
+    const headers = { Authorization: `Bearer ${token}` };
+    for (const kind of ["skills", "plugins", "mcp-servers", "apps", "hooks"]) {
+      const response = await fetch(`${base}/codex/extensions/${kind}?cwd=${encodeURIComponent(workspace)}`, { headers });
+      assert.equal(response.status, 200);
+      const body = await response.json();
+      assert.equal(body.kind, kind);
+      assert.ok(body.items.length > 0);
+    }
+    const refresh = await fetch(`${base}/codex/extensions/mcp-servers/refresh`, { method: "POST", headers });
+    assert.equal(refresh.status, 200);
+    assert.equal((await refresh.json()).refreshed, true);
+  } finally { await gateway.close(); }
+});

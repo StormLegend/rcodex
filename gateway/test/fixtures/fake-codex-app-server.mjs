@@ -77,6 +77,30 @@ lines.on("line", (line) => {
     ], nextCursor: null } });
     return;
   }
+  if (method === "skills/list") {
+    send({ jsonrpc: "2.0", id, result: { skills: [{ name: "review", enabled: true, cwd: params?.cwds?.[0] }] } });
+    return;
+  }
+  if (method === "plugin/list") {
+    send({ jsonrpc: "2.0", id, result: { plugins: [{ id: "plugin.demo", name: "Demo Plugin" }] } });
+    return;
+  }
+  if (method === "mcpServerStatus/list") {
+    send({ jsonrpc: "2.0", id, result: { data: [{ name: "filesystem", status: "connected" }], nextCursor: null } });
+    return;
+  }
+  if (method === "app/list") {
+    send({ jsonrpc: "2.0", id, result: { data: [{ id: "app.demo", name: "Demo App" }], nextCursor: null } });
+    return;
+  }
+  if (method === "hooks/list") {
+    send({ jsonrpc: "2.0", id, result: { hooks: [{ name: "pre-commit", enabled: true }] } });
+    return;
+  }
+  if (method === "mcpServer/refresh") {
+    send({ jsonrpc: "2.0", id, result: {} });
+    return;
+  }
   if (method === "thread/start") {
     approvalPolicy = params?.approvalPolicy ?? "never";
     modelProvider = params?.modelProvider ?? "custom";

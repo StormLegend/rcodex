@@ -94,6 +94,12 @@ Provider 在 `thread/start` / `thread/resume` 时绑定到会话；同一会话�
 | POST | `/notification-channels/webhook` | 创建 Webhook 通知渠道 |
 | POST | `/notification-channels/:id/test` | 测试 Webhook 通知渠道 |
 | DELETE | `/notification-channels/:id` | 删除通知渠道 |
+| GET | `/codex/extensions/skills` | 查看 Codex Skills |
+| GET | `/codex/extensions/plugins` | 查看 Codex Plugins |
+| GET | `/codex/extensions/mcp-servers` | 查看 MCP Server 状态 |
+| GET | `/codex/extensions/apps` | 查看 Codex Apps |
+| GET | `/codex/extensions/hooks` | 查看 Hooks |
+| POST | `/codex/extensions/mcp-servers/refresh` | 刷新 MCP Server 状态 |
 | GET | `/importable-threads` | 列出当前 Codex 可导入的历史 thread |
 | POST | `/sessions/import` | 按 threadId 导入历史会话 |
 

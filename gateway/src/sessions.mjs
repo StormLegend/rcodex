@@ -711,6 +711,25 @@ export function createSessionManager({
     return attachmentStore.read(session, attachment);
   }
 
+  async function listExtensions(kind, options = {}) {
+    const client = await ensureAppServer();
+    if (kind === "skills") return client.listSkills(options.cwd || config.allowedPaths[0], Boolean(options.forceReload));
+    if (kind === "plugins") return client.listPlugins(options.cwd ? [options.cwd] : config.allowedPaths, Boolean(options.forceRefetch));
+    if (kind === "mcp-servers") return client.listMcpServerStatuses(options.limit);
+    if (kind === "apps") return client.listApps(Boolean(options.forceRefetch), options.limit);
+    if (kind === "hooks") return client.listHooks(options.cwd || config.allowedPaths[0]);
+    const error = new Error("unsupported extension kind");
+    error.statusCode = 400;
+    error.code = "unsupported_extension_kind";
+    throw error;
+  }
+
+  async function refreshMcpServers() {
+    const client = await ensureAppServer();
+    await client.refreshMcpServers();
+    return { refreshed: true };
+  }
+
   async function interrupt(sessionId) {
     const session = store.get(sessionId);
     if (!session) {
@@ -783,5 +802,7 @@ export function createSessionManager({
     listImportableThreads,
     importSession,
     readAttachment,
+    listExtensions,
+    refreshMcpServers,
   };
 }
