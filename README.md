@@ -9,10 +9,10 @@
 > 重写进度见 [docs/ROADMAP.md](docs/ROADMAP.md)，架构说明见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)，
 > v0.2 设计见 [docs/V0.2-DESIGN.md](docs/V0.2-DESIGN.md)。
 > 自研网关当前已跑通：登录（验证码）→ 建会话 → 真实 `codex app-server` 出答案 → SSE 流式回传 → 文件浏览。
-> v0.2 已增加：活跃会话恢复、会话级 Provider/模型选择、运行时推理强度切换、工作区附件和 token 用量汇总。
+> v0.2 已增加：活跃会话恢复、会话级 Provider/模型选择、运行时推理强度切换、工作区附件、token 用量、分支/steer、事件历史和定时任务基础能力。
 
 ```bash
-cd gateway && npm test                      # 19/19 通过（含端到端会话流程）
+cd gateway && npm test                      # 25/25 通过（含端到端会话流程）
 RCODEX_SMOKE=1 CODEX_COMMAND=/path/to/rcodex-codex \
   node test/smoke-live.mjs /tmp/ws "只回复两个字：收到"   # 实弹：需要真实 Codex
 ```

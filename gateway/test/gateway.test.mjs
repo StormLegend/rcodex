@@ -402,3 +402,96 @@ test("different sessions can bind different Codex model providers", async () => 
     await gateway.close();
   }
 });
+
+test("fork creates a new session and steer forwards input to an active turn", async () => {
+  const { gateway, workspace } = setup();
+  const base = await listen(gateway);
+  try {
+    const token = await login(base, gateway);
+    const headers = { "Content-Type": "application/json", Authorization: `Bearer ${token}` };
+    const created = await fetch(`${base}/sessions`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ workspacePath: workspace, prompt: "original" }),
+    });
+    const source = (await created.json()).session;
+    const forked = await fetch(`${base}/sessions/${source.id}/fork`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ title: "分支", prompt: "fork prompt", modelProvider: "custom", model: "gpt-5.6-sol" }),
+    });
+    assert.equal(forked.status, 201);
+    const forkedSession = (await forked.json()).session;
+    assert.equal(forkedSession.forkedFromSessionId, source.id);
+    assert.equal(forkedSession.modelProvider, "custom");
+
+    const steered = await fetch(`${base}/sessions/${source.id}/steer`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ prompt: "please focus on tests" }),
+    });
+    assert.equal(steered.status, 200);
+  } finally {
+    await gateway.close();
+  }
+});
+
+test("session change endpoints report git status and diff safely", async () => {
+  const { gateway, workspace } = setup();
+  const base = await listen(gateway);
+  try {
+    const token = await login(base, gateway);
+    const headers = { Authorization: `Bearer ${token}` };
+    const created = await fetch(`${base}/sessions`, {
+      method: "POST",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify({ workspacePath: workspace, prompt: "changes" }),
+    });
+    const { session } = await created.json();
+    const status = await (await fetch(`${base}/sessions/${session.id}/changes`, { headers })).json();
+    assert.equal(status.repository, false);
+    assert.deepEqual(status.files, []);
+    const diff = await (await fetch(`${base}/sessions/${session.id}/changes/diff`, { headers })).json();
+    assert.equal(diff.repository, false);
+    assert.equal(diff.diff, "");
+  } finally {
+    await gateway.close();
+  }
+});
+
+test("schedules persist, can be paused/resumed, and start a session on demand", async () => {
+  const { gateway, workspace } = setup();
+  const base = await listen(gateway);
+  try {
+    const token = await login(base, gateway);
+    const headers = { "Content-Type": "application/json", Authorization: `Bearer ${token}` };
+    const created = await fetch(`${base}/schedules`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        name: "测试任务",
+        prompt: "scheduled prompt",
+        workspacePath: workspace,
+        trigger: { type: "interval", intervalSeconds: 60 },
+      }),
+    });
+    assert.equal(created.status, 201);
+    const schedule = (await created.json()).schedule;
+    assert.equal(schedule.status, "active");
+    assert.equal((await (await fetch(`${base}/schedules`, { headers })).json()).schedules.length, 1);
+
+    const paused = await fetch(`${base}/schedules/${schedule.id}/pause`, { method: "POST", headers });
+    assert.equal((await paused.json()).schedule.status, "paused");
+    const resumed = await fetch(`${base}/schedules/${schedule.id}/resume`, { method: "POST", headers });
+    assert.equal((await resumed.json()).schedule.status, "active");
+    const run = await fetch(`${base}/schedules/${schedule.id}/run`, { method: "POST", headers });
+    assert.equal(run.status, 200);
+    const runBody = await run.json();
+    assert.equal(runBody.run.status, "started");
+    assert.ok(runBody.run.sessionId);
+    const runs = await (await fetch(`${base}/schedule-runs?scheduleId=${encodeURIComponent(schedule.id)}`, { headers })).json();
+    assert.equal(runs.runs.length, 1);
+  } finally {
+    await gateway.close();
+  }
+});

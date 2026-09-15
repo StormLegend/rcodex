@@ -182,6 +182,20 @@ export class CodexAppServer {
     return response?.thread ?? response;
   }
 
+  async forkThread(threadId, options = {}) {
+    const response = await this.request("thread/fork", {
+      threadId,
+      cwd: options.cwd,
+      model: options.model,
+      modelProvider: options.modelProvider,
+      approvalPolicy: options.approvalPolicy,
+      approvalsReviewer: options.approvalsReviewer,
+      sandbox: options.sandbox,
+      ephemeral: false,
+    });
+    return response?.thread ?? response;
+  }
+
   async updateThreadSettings(threadId, settings = {}) {
     const response = await this.request("thread/settings/update", {
       threadId,
@@ -221,6 +235,19 @@ export class CodexAppServer {
 
   async interrupt(threadId) {
     await this.request("turn/interrupt", { threadId });
+  }
+
+  async steerTurn(threadId, turnId, prompt, attachments = []) {
+    const input = [{ type: "text", text: prompt, text_elements: [] }];
+    for (const attachment of attachments) {
+      if (attachment.kind === "image" || attachment.mimeType?.startsWith("image/")) {
+        input.push({ type: "local_image", path: attachment.path });
+      } else {
+        input.push({ type: "text", text: `\n[附件: ${attachment.name}]\n${attachment.content ?? attachment.path}\n`, text_elements: [] });
+      }
+    }
+    const response = await this.request("turn/steer", { threadId, turnId, input });
+    return response?.turn?.id ?? response?.turnId;
   }
 
   async stop() {

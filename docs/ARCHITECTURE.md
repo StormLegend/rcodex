@@ -24,6 +24,9 @@
 | `sessions.mjs` | 会话生命周期：起线程、发轮次、通知翻译、状态机 |
 | `codex-app-server.mjs` | `codex app-server` 的 JSON-RPC 客户端（含反向请求处理） |
 | `events.mjs` | 每会话事件总线（环形缓冲 + 订阅），支撑 SSE 补齐与增量 |
+| `attachments.mjs` | 附件安全存储、大小/文件名限制和 Codex 输入转换 |
+| `changes.mjs` | 工作区 Git 状态和 diff 查询 |
+| `schedules.mjs` | 持久化 once/interval 定时任务、暂停/恢复和运行记录 |
 | `session-store.mjs` | 会话持久化（`dataDir/sessions.json`，原子写） |
 | `permissions.mjs` | 三档权限模式 → app-server 参数映射，审批请求的识别与归类 |
 | `requests.mjs` | 等待人工处理的审批/提问（含超时与安全缺省） |
@@ -83,7 +86,10 @@ starting ──▶ running ⇄ waiting-approval ──▶ completed
 
 另外派生两个便于直接渲染的事件：`session-message-delta`（纯文本增量）和
 `session-status`（状态变化，带最新 session 快照）。SSE 连接建立时先回放缓冲历史，再推增量；
-25 秒一次注释帧保活。
+25 秒一次注释帧保活。事件同时持久化到 `dataDir/events/<sessionId>.jsonl`，网关重启后仍可回放最近窗口。
+
+会话还支持 `thread/fork` 创建分支和 `turn/steer` 向活动轮次追加指令；Provider 在 thread
+创建/恢复时绑定，跨 Provider 由新会话承载。
 
 ## 与官方实现的差异（有意为之）
 

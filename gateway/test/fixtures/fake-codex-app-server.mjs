@@ -24,17 +24,17 @@ function notify(method, params) {
   send({ jsonrpc: "2.0", method, params });
 }
 
-function finishTurn(text) {
+function finishTurn(text, threadId = THREAD_ID) {
   setTimeout(() => {
-    notify("thread/status/changed", { threadId: THREAD_ID, status: { type: "active" } });
-    notify("item/agentMessage/delta", { threadId: THREAD_ID, delta: text });
+    notify("thread/status/changed", { threadId, status: { type: "active" } });
+    notify("item/agentMessage/delta", { threadId, delta: text });
     notify("thread/tokenUsage/updated", {
-      threadId: THREAD_ID,
+      threadId,
       tokenUsage: { total: { inputTokens: 12, outputTokens: 7, totalTokens: 19 } },
     });
-    notify("item/completed", { threadId: THREAD_ID, item: { type: "agentMessage", text } });
-    notify("turn/completed", { threadId: THREAD_ID, turnId: "turn-1" });
-    notify("thread/status/changed", { threadId: THREAD_ID, status: { type: "idle" } });
+    notify("item/completed", { threadId, item: { type: "agentMessage", text } });
+    notify("turn/completed", { threadId, turnId: "turn-1" });
+    notify("thread/status/changed", { threadId, status: { type: "idle" } });
   }, 10);
 }
 
@@ -87,6 +87,14 @@ lines.on("line", (line) => {
     });
     return;
   }
+  if (method === "thread/fork") {
+    send({
+      jsonrpc: "2.0",
+      id,
+      result: { thread: { id: `${THREAD_ID}-fork`, model: params?.model ?? "deepseek-flash", modelProvider: params?.modelProvider ?? modelProvider, reasoningEffort: "medium" } },
+    });
+    return;
+  }
   if (method === "thread/settings/update") {
     send({ jsonrpc: "2.0", id, result: { thread: { id: THREAD_ID, model: params?.model, reasoningEffort: params?.reasoningEffort } } });
     return;
@@ -130,6 +138,11 @@ lines.on("line", (line) => {
       return;
     }
     finishTurn(`收到：${prompt}`);
+    return;
+  }
+  if (method === "turn/steer") {
+    send({ jsonrpc: "2.0", id, result: { turn: { id: "turn-steered" } } });
+    finishTurn(`steered:${params?.input?.[0]?.text ?? ""}`, params?.threadId ?? THREAD_ID);
     return;
   }
   if (method === "turn/interrupt") {

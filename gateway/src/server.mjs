@@ -1,11 +1,13 @@
 import http from "node:http";
 import { createAttachmentStore } from "./attachments.mjs";
+import { createChangesService } from "./changes.mjs";
 import { createCaptchaStore, isAuthorized, validateCredentials } from "./auth.mjs";
 import { renderConsoleHtml } from "./console.mjs";
 import { createEventBus } from "./events.mjs";
 import { createFilesystem } from "./filesystem.mjs";
 import { createSessionStore } from "./session-store.mjs";
 import { createSessionManager } from "./sessions.mjs";
+import { createScheduleService } from "./schedules.mjs";
 import { nowIso, readJsonBody, sendError, sendJson } from "./util.mjs";
 
 function matchSessionChild(pathname, suffix) {
@@ -20,16 +22,19 @@ function matchSessionAction(pathname, action) {
 
 export function createGatewayServer({ config, logger }) {
   const captcha = createCaptchaStore();
-  const bus = createEventBus();
+  const bus = createEventBus({ dataDir: config.dataDir });
   const store = createSessionStore({ dataDir: config.dataDir });
   store.load();
   const files = createFilesystem({ allowedPaths: config.allowedPaths });
   const attachments = createAttachmentStore({ files });
+  const changes = createChangesService({ files });
   const sessions = createSessionManager({ config, store, bus, logger, attachmentStore: attachments });
+  const schedules = createScheduleService({ dataDir: config.dataDir, sessions, files, logger });
 
   async function handlePublic(req, res, pathname) {
-    if (req.method === "GET" && pathname === "/health") {
-      sendJson(res, 200, { status: "ok", name: config.name, version: config.version, time: nowIso() });
+    if (req.method === "GET" && (pathname === "/health" || pathname === "/healthz")) {
+      const timestamp = nowIso();
+      sendJson(res, 200, { status: "ok", ok: true, name: config.name, gatewayName: config.name, version: config.version, time: timestamp, timestamp });
       return true;
     }
     if (req.method === "GET" && (pathname === "/" || pathname === "")) {
@@ -82,7 +87,7 @@ export function createGatewayServer({ config, logger }) {
     return false;
   }
 
-  async function handleSessions(req, res, pathname) {
+  async function handleSessions(req, res, pathname, searchParams) {
     if (req.method === "GET" && pathname === "/sessions") {
       sendJson(res, 200, { sessions: store.list() });
       return true;
@@ -101,7 +106,42 @@ export function createGatewayServer({ config, logger }) {
       sendJson(res, 201, { session });
       return true;
     }
-    if (req.method === "GET" && pathname === "/usage") {
+    if (req.method === "GET" && pathname === "/schedules") {
+      sendJson(res, 200, { schedules: schedules.list() });
+      return true;
+    }
+    if (req.method === "POST" && pathname === "/schedules") {
+      const body = await readJsonBody(req);
+      sendJson(res, 201, { schedule: await schedules.create(body) });
+      return true;
+    }
+    if (req.method === "GET" && pathname === "/schedule-runs") {
+      sendJson(res, 200, { runs: schedules.listRuns(searchParams?.get("scheduleId") || undefined) });
+      return true;
+    }
+    const scheduleActionMatch = pathname.match(/^\/schedules\/([^/]+)\/(pause|resume|run)$/);
+    if (scheduleActionMatch && req.method === "POST") {
+      const id = decodeURIComponent(scheduleActionMatch[1]);
+      const action = scheduleActionMatch[2];
+      const result = action === "pause" ? await schedules.pause(id) : action === "resume" ? await schedules.resume(id) : await schedules.runNow(id);
+      if (!result) {
+        sendError(res, 404, "schedule not found", "not_found");
+        return true;
+      }
+      sendJson(res, 200, action === "run" ? { schedule: schedules.get(id), run: result } : { schedule: result });
+      return true;
+    }
+    const scheduleMatch = pathname.match(/^\/schedules\/([^/]+)$/);
+    if (scheduleMatch && req.method === "DELETE") {
+      const id = decodeURIComponent(scheduleMatch[1]);
+      if (!(await schedules.remove(id))) {
+        sendError(res, 404, "schedule not found", "not_found");
+        return true;
+      }
+      sendJson(res, 200, { deleted: true, id });
+      return true;
+    }
+    if (req.method === "GET" && (pathname === "/usage" || pathname === "/api/usage/summary")) {
       const sessions = store.list();
       const totals = sessions.reduce((result, session) => {
         const usage = session.usage ?? {};
@@ -124,6 +164,38 @@ export function createGatewayServer({ config, logger }) {
     if (req.method === "PUT" && runtimeConfigSessionId) {
       const body = await readJsonBody(req);
       sendJson(res, 200, { session: await sessions.updateRuntimeConfig(runtimeConfigSessionId, body) });
+      return true;
+    }
+    const forkSessionId = matchSessionChild(pathname, "/fork");
+    if (req.method === "POST" && forkSessionId) {
+      const body = await readJsonBody(req);
+      sendJson(res, 201, { session: await sessions.forkSession(forkSessionId, body) });
+      return true;
+    }
+    const steerSessionId = matchSessionChild(pathname, "/steer");
+    if (req.method === "POST" && steerSessionId) {
+      const body = await readJsonBody(req);
+      sendJson(res, 200, { session: await sessions.steerSession(steerSessionId, body.prompt, body.attachmentIds ?? []) });
+      return true;
+    }
+    const changesDiffSessionId = matchSessionChild(pathname, "/changes/diff");
+    if (req.method === "GET" && changesDiffSessionId) {
+      const session = store.get(changesDiffSessionId);
+      if (!session) {
+        sendError(res, 404, "session not found", "not_found");
+        return true;
+      }
+      sendJson(res, 200, await changes.diff(session.workspacePath));
+      return true;
+    }
+    const changesSessionId = matchSessionChild(pathname, "/changes");
+    if (req.method === "GET" && changesSessionId) {
+      const session = store.get(changesSessionId);
+      if (!session) {
+        sendError(res, 404, "session not found", "not_found");
+        return true;
+      }
+      sendJson(res, 200, await changes.status(session.workspacePath));
       return true;
     }
     const attachmentSessionId = matchSessionChild(pathname, "/attachments");
@@ -202,7 +274,9 @@ export function createGatewayServer({ config, logger }) {
         Connection: "keep-alive",
       });
       const send = (entry) => res.write(`data: ${JSON.stringify(entry)}\n\n`);
-      for (const entry of bus.history(eventsSessionId)) send(entry);
+      const requestedLimit = Number(searchParams?.get("limit") || 500);
+      const limit = Number.isFinite(requestedLimit) ? Math.max(1, Math.min(500, Math.trunc(requestedLimit))) : 500;
+      for (const entry of bus.history(eventsSessionId, limit)) send(entry);
       const unsubscribe = bus.subscribe(eventsSessionId, send);
       const keepAlive = setInterval(() => res.write(": ping\n\n"), 25000);
       req.on("close", () => {
@@ -268,7 +342,7 @@ export function createGatewayServer({ config, logger }) {
         sendError(res, 401, "unauthorized", "unauthorized");
         return;
       }
-      if (await handleSessions(req, res, pathname)) return;
+      if (await handleSessions(req, res, pathname, url.searchParams)) return;
       if (await handleFilesystem(req, res, pathname, url.searchParams)) return;
       sendError(res, 404, `no route for ${req.method} ${pathname}`, "not_found");
     } catch (error) {
@@ -280,9 +354,10 @@ export function createGatewayServer({ config, logger }) {
   });
 
   async function close() {
+    schedules.stop();
     await sessions.shutdown();
     await new Promise((resolve) => server.close(resolve));
   }
 
-  return { server, close, store, bus, sessions, files, captcha };
+  return { server, close, store, bus, sessions, files, captcha, schedules, changes };
 }

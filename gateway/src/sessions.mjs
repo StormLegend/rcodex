@@ -369,6 +369,128 @@ export function createSessionManager({
     return updated;
   }
 
+  async function forkSession(sessionId, input = {}) {
+    const source = store.get(sessionId);
+    if (!source) {
+      const error = new Error("session not found");
+      error.statusCode = 404;
+      throw error;
+    }
+    const requestedProvider = input.modelProvider === undefined
+      ? source.modelProvider
+      : normalizeModelProvider(input.modelProvider);
+    const providerEntry = (config.codexProviders ?? []).find((entry) => entry.provider === requestedProvider);
+    if ((config.codexProviders ?? []).length > 0 && !providerEntry) {
+      const error = new Error(`unknown model provider: ${requestedProvider}`);
+      error.statusCode = 400;
+      error.code = "unknown_model_provider";
+      throw error;
+    }
+    const mode = parsePermissionMode(input.permissionMode, source.permissionMode ?? config.defaultPermissionMode ?? "full");
+    const settings = permissionSettingsForMode(mode, source.workspacePath);
+    const model = trimmed(input.model) || source.modelOverride || providerEntry?.models?.[0];
+    const client = await ensureAppServer();
+    const thread = await client.forkThread(source.providerSessionId, {
+      cwd: source.workspacePath,
+      model,
+      modelProvider: requestedProvider,
+      approvalPolicy: settings.approvalPolicy,
+      approvalsReviewer: settings.approvalsReviewer,
+      sandbox: settings.sandbox,
+    });
+    const threadId = thread?.id;
+    if (!threadId) {
+      const error = new Error("codex app-server did not return a forked thread id");
+      error.statusCode = 502;
+      throw error;
+    }
+    const forkedId = newId();
+    const createdAt = nowIso();
+    const prompt = trimmed(input.prompt);
+    const session = {
+      id: forkedId,
+      sessionType: "development",
+      provider: "codex",
+      modelProvider: thread.modelProvider ?? requestedProvider,
+      providerSessionId: threadId,
+      forkedFromSessionId: source.id,
+      title: trimmed(input.title) || `${source.title}（分支）`,
+      latestPrompt: prompt || source.latestPrompt,
+      workspacePath: source.workspacePath,
+      status: prompt ? "starting" : "completed",
+      permissionMode: mode,
+      canResume: true,
+      resumeStatus: "resumable",
+      command: `${config.codexCommand} app-server`,
+      args: ["thread/fork", "turn/start"],
+      modelOverride: model,
+      modelLabel: thread.model ?? model,
+      reasoningEffort: input.reasoningEffort ?? source.reasoningEffort ?? thread.reasoningEffort,
+      createdAt,
+      startedAt: createdAt,
+      lastUpdatedAt: createdAt,
+      attachments: [],
+      usage: undefined,
+    };
+    threadToSession.set(threadId, forkedId);
+    store.upsert(session);
+    bus.emit(forkedId, { type: "session-started", payload: { session } });
+    if (!prompt) return session;
+    try {
+      const turnId = await client.startTurn({
+        threadId,
+        prompt,
+        cwd: source.workspacePath,
+        model,
+        effort: session.reasoningEffort,
+        approvalPolicy: settings.approvalPolicy,
+        approvalsReviewer: settings.approvalsReviewer,
+        sandboxPolicy: settings.sandboxPolicy,
+      });
+      setStatus(forkedId, "running", { activeTurnId: turnId, lastTurnStartedAt: nowIso() });
+    } catch (error) {
+      setStatus(forkedId, "failed", { exitReason: String(error.message ?? error), finishedAt: nowIso() });
+      throw error;
+    }
+    return store.get(forkedId);
+  }
+
+  async function steerSession(sessionId, prompt, attachmentIds = []) {
+    const session = store.get(sessionId);
+    if (!session) {
+      const error = new Error("session not found");
+      error.statusCode = 404;
+      throw error;
+    }
+    if (!session.activeTurnId || !["running", "waiting-approval"].includes(session.status)) {
+      const error = new Error("session has no active turn to steer");
+      error.statusCode = 409;
+      error.code = "no_active_turn";
+      throw error;
+    }
+    const cleanPrompt = trimmed(prompt);
+    if (!cleanPrompt) {
+      const error = new Error("prompt is required");
+      error.statusCode = 400;
+      throw error;
+    }
+    const selected = (session.attachments ?? []).filter((item) => attachmentIds.map(String).includes(item.id));
+    if (selected.length !== new Set(attachmentIds.map(String)).size) {
+      const error = new Error("one or more attachments do not belong to this session");
+      error.statusCode = 400;
+      error.code = "invalid_attachment_reference";
+      throw error;
+    }
+    const attachments = attachmentStore
+      ? await Promise.all(selected.map((item) => attachmentStore.promptAttachment(session, item)))
+      : [];
+    const client = await ensureAppServer();
+    const turnId = await client.steerTurn(session.providerSessionId, session.activeTurnId, cleanPrompt, attachments);
+    const updated = store.update(sessionId, () => ({ latestPrompt: cleanPrompt, lastUpdatedAt: nowIso(), activeTurnId: turnId || session.activeTurnId }));
+    bus.emit(sessionId, { type: "session-steered", payload: { sessionId, prompt: cleanPrompt, session: updated } });
+    return updated;
+  }
+
   async function addAttachment(sessionId, input) {
     const session = store.get(sessionId);
     if (!session) {
@@ -533,6 +655,8 @@ export function createSessionManager({
   return {
     createSession,
     runTurn,
+    forkSession,
+    steerSession,
     interrupt,
     remove,
     shutdown,

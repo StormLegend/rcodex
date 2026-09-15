@@ -50,6 +50,8 @@ Provider 在 `thread/start` / `thread/resume` 时绑定到会话；同一会话�
 | POST | `/sessions` | 新建会话并发出第一轮（`workspacePath`、`prompt`、`model`、`reasoningEffort`） |
 | GET/DELETE | `/sessions/:id` | 会话详情 / 删除 |
 | POST | `/sessions/:id/turns` | 追加一轮 |
+| POST | `/sessions/:id/steer` | 向当前活动轮次追加指令 |
+| POST | `/sessions/:id/fork` | 从当前 thread 创建分支会话 |
 | POST | `/sessions/:id/resume` | 恢复持久化的 Codex thread |
 | PUT | `/sessions/:id/runtime-config` | 修改会话模型、推理强度和 service tier |
 | POST | `/sessions/:id/attachments` | 上传 base64 附件到会话工作区 |
@@ -59,10 +61,21 @@ Provider 在 `thread/start` / `thread/resume` 时绑定到会话；同一会话�
 | POST | `/sessions/:id/approvals/:requestId` | 审批回执 `{"decision":"approve"｜"deny"}` |
 | POST | `/sessions/:id/questions/:requestId` | 回答问题 `{"answers":{"q1":["选项"]}}` |
 | GET | `/sessions/:id/events` | SSE 事件流（先补历史，再推增量） |
+| GET | `/sessions/:id/changes` | 查看工作区 Git 变更状态 |
+| GET | `/sessions/:id/changes/diff` | 查看工作区 Git diff |
 | GET | `/filesystem/roots` | 允许访问的根目录 |
 | GET | `/filesystem/list?path=` | 列目录 |
 | GET | `/filesystem/read?path=` | 读文件（默认上限 1 MiB，超出截断） |
 | GET | `/usage` | 查看会话与全局 token 用量 |
+| GET/POST | `/schedules` | 查看 / 创建持久化定时任务（once / interval） |
+| GET | `/schedule-runs?scheduleId=` | 查看任务执行记录 |
+| POST | `/schedules/:id/pause` | 暂停任务 |
+| POST | `/schedules/:id/resume` | 恢复任务 |
+| POST | `/schedules/:id/run` | 立即执行一次任务 |
+| DELETE | `/schedules/:id` | 删除任务 |
+
+`/healthz` 是 `/health` 的兼容别名，`/api/usage/summary` 是 `/usage` 的兼容别名。
+事件历史会持久化到 `GATEWAY_DATA_DIR/events/`，SSE 可用 `?limit=200` 控制首批回放数量。
 
 除 `/health`、`/console`、`/auth/*` 外都需要 `Authorization: Bearer <token>`；SSE 因为
 EventSource 不能带 header，支持 `?token=`。
@@ -110,7 +123,7 @@ EventSource 不能带 header，支持 `?token=`。
 ## 测试
 
 ```bash
-npm test                                    # 19 个用例：配置、鉴权、文件、端到端会话流程
+npm test                                    # 25 个用例：配置、鉴权、文件、端到端会话流程
 RCODEX_SMOKE=1 CODEX_COMMAND=/path/to/rcodex-codex \
   node test/smoke-live.mjs /tmp/workspace "只回复两个字：收到"   # 实弹冒烟（需要真实 Codex）
 ```
