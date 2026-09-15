@@ -8,7 +8,7 @@
 - [x] 事件：SSE（历史回放 + 增量 + 保活），原样透传 app-server 通知
 - [x] 文件：白名单根目录、`realpath` 防越界、列目录、读文件（带截断）
 - [x] 控制台：登录、会话列表、流式输出、发消息
-- [x] 测试：25 个单元/集成用例 + 真实 `codex app-server` 实弹冒烟
+- [x] 测试：26 个单元/集成用例 + 真实 `codex app-server` 实弹冒烟
 
 ## Phase 1 —— 达到"日常可用"
 
@@ -38,7 +38,7 @@
 
 ## Phase 3 —— 分发与生态
 
-- [ ] npm 发布 `rcodex-gateway` + `install.sh` 一键部署脚本
+- [x] npm/源码模式发布 `rcodex-gateway` + setup/service 一键部署脚本
 - [ ] 与官方 App 的兼容性回归测试（对同一套接口跑双实现，比对响应）
 - [ ] Claude Code provider 支持
 - [ ] 指标与可观测性（请求耗时、轮次时长、模型花费）

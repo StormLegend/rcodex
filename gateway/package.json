@@ -1,6 +1,6 @@
 {
   "name": "rcodex-gateway",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "A clean-room, self-hosted gateway that drives the Codex app-server and serves a console + HTTP API compatible with the rCodex app.",
   "license": "MIT",
   "type": "module",

@@ -56,7 +56,7 @@ function parseProviderCatalog(value, fallbackProvider, fallbackModels) {
       : [];
     if (!/^[A-Za-z0-9_-]+$/.test(provider)) throw new Error(`invalid Codex model provider: ${provider || "(empty)"}`);
     return { provider, models: [...new Set(models)] };
-  }).filter((entry) => entry.models.length > 0);
+  });
   return catalog.length ? catalog : [{ provider: fallbackProvider, models: [...fallbackModels] }];
 }
 
@@ -85,7 +85,7 @@ export function loadConfig({ env = process.env, envFile } = {}) {
     throw error;
   }
   const config = {
-    version: "0.2.0",
+    version: "0.3.0",
     name: get("GATEWAY_NAME", "rcodex-gateway"),
     host: get("GATEWAY_HOST", "127.0.0.1"),
     port: Number(get("GATEWAY_PORT", "8787")),

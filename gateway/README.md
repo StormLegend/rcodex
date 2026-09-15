@@ -21,6 +21,19 @@ node src/cli.mjs start
 # 控制台 http://127.0.0.1:8787/console
 ```
 
+首次使用推荐直接运行自动配置向导：
+
+```bash
+node src/cli.mjs setup --yes --install-service
+node src/cli.mjs service start
+```
+
+向导会读取 `~/.codex/config.toml`，发现 Provider、默认模型和可用的 `env_key`，尝试从各 Provider
+的 `/models` 接口获取模型目录，生成 `~/.rcodex/gateway/gateway.env`，并创建用户级 systemd 服务。
+API key 只由 Codex 的环境变量读取，不会写入 Gateway 配置或返回给浏览器。没有网络时可加
+`--no-network`，向导会使用 Codex 配置里的默认模型继续生成。自定义输出路径使用
+`--gateway-env-file`（不要使用 Node.js 自带的 `--env-file` 参数）。
+
 配置也可以放在 env 文件里（`RCODEX_GATEWAY_ENV=/path/to/gateway.env`），变量名与官方网关一致：
 `GATEWAY_HOST`、`GATEWAY_PORT`、`GATEWAY_NAME`、`GATEWAY_DATA_DIR`、`GATEWAY_ALLOWED_PATHS`、
 `GATEWAY_AUTH_USERNAME`、`GATEWAY_AUTH_PASSWORD`、`GATEWAY_AUTH_TOKEN`、`CODEX_COMMAND`、
@@ -123,7 +136,7 @@ EventSource 不能带 header，支持 `?token=`。
 ## 测试
 
 ```bash
-npm test                                    # 25 个用例：配置、鉴权、文件、端到端会话流程
+npm test                                    # 26 个用例：配置、鉴权、文件、端到端会话流程
 RCODEX_SMOKE=1 CODEX_COMMAND=/path/to/rcodex-codex \
   node test/smoke-live.mjs /tmp/workspace "只回复两个字：收到"   # 实弹冒烟（需要真实 Codex）
 ```
