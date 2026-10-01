@@ -25,8 +25,14 @@ func New(s *store.Store, c config.Config, log *slog.Logger) *Engine {
 }
 func (e *Engine) Start(ctx context.Context) {
 	ctx, e.cancel = context.WithCancel(ctx)
-	e.wg.Add(1)
-	go e.loop(ctx)
+	workers := e.Config.Workers
+	if workers < 1 {
+		workers = 1
+	}
+	e.wg.Add(workers)
+	for i := 0; i < workers; i++ {
+		go e.loop(ctx)
+	}
 }
 func (e *Engine) loop(ctx context.Context) {
 	defer e.wg.Done()
@@ -48,6 +54,7 @@ func (e *Engine) run(parent context.Context, t store.Turn) {
 	ctx, cancel := context.WithTimeout(parent, time.Duration(e.Config.TurnSeconds)*time.Second)
 	defer cancel()
 	s, err := e.Store.Session(t.SessionID)
+	result := ""
 	if err == nil {
 		rt := e.Runtimes[s.Runtime]
 		if rt == nil {
@@ -56,7 +63,7 @@ func (e *Engine) run(parent context.Context, t store.Turn) {
 			var rs runtime.Session
 			var er error
 			if s.NativeID != "" {
-				rs = runtime.Session{ID: s.NativeID, Runtime: s.Runtime, CWD: s.Workspace, Model: s.Model}
+				rs = runtime.Session{ID: s.NativeID, Runtime: s.Runtime, CWD: s.Workspace, Model: s.Model, Mode: s.Mode}
 				rs, er = rt.Resume(ctx, rs, nil)
 			} else {
 				rs, er = rt.Start(ctx, s.Workspace, s.Model, s.Mode, nil)
@@ -67,14 +74,14 @@ func (e *Engine) run(parent context.Context, t store.Turn) {
 				if rs.ID != "" {
 					_ = e.Store.Native(s.ID, rs.ID)
 				}
-				_, err = rt.Turn(ctx, rs, t.Prompt, func(ev runtime.Event) error {
+				result, err = rt.Turn(ctx, rs, t.Prompt, func(ev runtime.Event) error {
 					_, err := e.Store.Event(t.SessionID, t.ID, ev.Method, ev.Params)
 					return err
 				})
 			}
 		}
 	}
-	if err = e.Store.Finish(t, "", err); err != nil {
+	if err = e.Store.Finish(t, result, err); err != nil {
 		e.Log.Error("turn finish failed", "error", err)
 	}
 }

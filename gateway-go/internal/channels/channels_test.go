@@ -1,8 +1,13 @@
 package channels
 
 import (
+	"bytes"
 	"context"
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/ed25519"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"net/http/httptest"
@@ -53,5 +58,24 @@ func TestFeishuChallenge(t *testing.T) {
 	Feishu(func(context.Context, Message) error { return nil }, c).ServeHTTP(w, r)
 	if w.Code != 200 || !strings.Contains(w.Body.String(), "abc") {
 		t.Fatalf("code=%d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestFeishuEncryptedEvent(t *testing.T) {
+	key := "encrypt-key"
+	plain := `{"event":{"message":{"chat_id":"c1","content":"hello"},"sender":{"sender_id":{"open_id":"u1"}}},"header":{"event_id":"e1"}}`
+	hash := sha256.Sum256([]byte(key))
+	block, _ := aes.NewCipher(hash[:])
+	pad := block.BlockSize() - len(plain)%block.BlockSize()
+	p := append([]byte(plain), bytes.Repeat([]byte{byte(pad)}, pad)...)
+	out := make([]byte, len(p))
+	cipher.NewCBCEncrypter(block, hash[:block.BlockSize()]).CryptBlocks(out, p)
+	c := config.Channel{Secret: "", EncryptKey: key, Users: []string{"u1"}, Chats: []string{"c1"}}
+	var got Message
+	r := httptest.NewRequest("POST", "/", strings.NewReader(`{"encrypt":"`+base64.StdEncoding.EncodeToString(out)+`"}`))
+	w := httptest.NewRecorder()
+	Feishu(func(_ context.Context, m Message) error { got = m; return nil }, c).ServeHTTP(w, r)
+	if w.Code != 204 || got.Text != "hello" {
+		t.Fatalf("code=%d got=%+v body=%s", w.Code, got, w.Body.String())
 	}
 }

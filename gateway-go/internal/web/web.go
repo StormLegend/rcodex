@@ -31,6 +31,7 @@ func (s *Server) Handler() http.Handler {
 	m.HandleFunc("/api/sessions/", s.session)
 	m.HandleFunc("/api/turns", s.turns)
 	m.HandleFunc("/api/turns/", s.turn)
+	m.HandleFunc("/api/approvals/", s.approval)
 	if c, ok := s.Cfg.Channels["telegram"]; ok {
 		m.Handle("/webhooks/telegram", channels.Telegram(s.channelMessage, c))
 	}
@@ -48,7 +49,8 @@ func (s *Server) channelMessage(ctx context.Context, m channels.Message) error {
 	if e != nil {
 		return e
 	}
-	_, e = s.Store.Enqueue(session.ID, m.Text, "channel:"+m.Channel+":"+m.ID, "", s.Cfg.QueueLimit)
+	notify, _ := json.Marshal(store.Notification{Channel: m.Channel, Chat: m.Chat, Token: m.Token, AppID: ch.AppID})
+	_, e = s.Store.Enqueue(session.ID, m.Text, "channel:"+m.Channel+":"+m.ID, string(notify), s.Cfg.QueueLimit)
 	return e
 }
 func auth(c config.Config, next http.Handler) http.Handler {
@@ -151,12 +153,58 @@ func (s *Server) turns(w http.ResponseWriter, r *http.Request) {
 }
 func (s *Server) turn(w http.ResponseWriter, r *http.Request) {
 	id := strings.TrimPrefix(r.URL.Path, "/api/turns/")
+	if strings.HasSuffix(id, "/cancel") {
+		id = strings.TrimSuffix(id, "/cancel")
+		if r.Method != http.MethodPost {
+			http.NotFound(w, r)
+			return
+		}
+		if e := s.Store.CancelQueued(id); e != nil {
+			s.writeErr(w, e)
+			return
+		}
+		s.write(w, 200, map[string]bool{"ok": true})
+		return
+	}
 	t, e := s.Store.Turn(id)
 	if e != nil {
 		s.writeErr(w, e)
 		return
 	}
 	s.write(w, 200, map[string]any{"turn": t})
+}
+func (s *Server) approval(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/api/approvals/"), "/")
+	if id == "" {
+		http.NotFound(w, r)
+		return
+	}
+	if r.Method == http.MethodGet {
+		v, e := s.Store.Approval(id)
+		if e != nil {
+			s.writeErr(w, e)
+			return
+		}
+		s.write(w, 200, map[string]any{"approval": v})
+		return
+	}
+	if r.Method == http.MethodPost {
+		var v struct {
+			Approved bool   `json:"approved"`
+			Reason   string `json:"reason"`
+		}
+		if json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&v) != nil {
+			s.writeErr(w, errors.New("invalid body"))
+			return
+		}
+		if e := s.Store.Resolve(id, v); e != nil {
+			s.writeErr(w, e)
+			return
+		}
+		s.write(w, 200, map[string]bool{"ok": true})
+		return
+	}
+	http.NotFound(w, r)
 }
 func (s *Server) write(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
@@ -184,8 +232,35 @@ func Run(ctx context.Context, s *Server) error {
 		defer cancel()
 		srv.Shutdown(c)
 	}()
+	go s.deliver(ctx)
 	if s.Cfg.TLSCert != "" {
 		return srv.ListenAndServeTLS(s.Cfg.TLSCert, s.Cfg.TLSKey)
 	}
 	return srv.ListenAndServe()
+}
+
+func (s *Server) deliver(ctx context.Context) {
+	t := time.NewTicker(500 * time.Millisecond)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			items, err := s.Store.Deliveries()
+			if err != nil {
+				s.Log.Error("outbox scan failed", "error", err)
+				continue
+			}
+			for _, item := range items {
+				err := channels.Deliver(ctx, item, s.Cfg)
+				if e := s.Store.DeliveryResult(item.ID, item.Attempts+1, err == nil); e != nil {
+					s.Log.Error("outbox update failed", "error", e)
+				}
+				if err != nil {
+					s.Log.Warn("outbox delivery failed", "id", item.ID, "attempt", item.Attempts+1, "error", err)
+				}
+			}
+		}
+	}
 }

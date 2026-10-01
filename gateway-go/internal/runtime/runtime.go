@@ -36,11 +36,13 @@ type Session struct {
 	Runtime string
 	CWD     string
 	Model   string
+	Mode    string
 }
 type adapter struct {
 	cmd     string
 	args    []string
 	mu      sync.Mutex
+	runMu   sync.Mutex
 	proc    *exec.Cmd
 	stdin   io.WriteCloser
 	next    int64
@@ -140,6 +142,8 @@ func NewCodex(command string) Runtime {
 	return &Codex{adapter{cmd: command, args: []string{"app-server"}}}
 }
 func (a *Codex) Start(ctx context.Context, cwd, model, mode string, h Handler) (Session, error) {
+	a.runMu.Lock()
+	defer a.runMu.Unlock()
 	_, e := a.startProcess(ctx, cwd)
 	if e != nil {
 		return Session{}, e
@@ -147,7 +151,8 @@ func (a *Codex) Start(ctx context.Context, cwd, model, mode string, h Handler) (
 	if _, e = a.request(ctx, "initialize", map[string]any{"clientInfo": map[string]string{"name": "rcodex-go", "version": "0.1"}}); e != nil {
 		return Session{}, e
 	}
-	threadRaw, e := a.request(ctx, "thread/start", map[string]any{"cwd": cwd, "model": model, "sandbox": "danger-full-access", "approvalPolicy": map[string]any{"type": mode}})
+	settings := permissionSettings(cwd, mode)
+	threadRaw, e := a.request(ctx, "thread/start", map[string]any{"cwd": cwd, "model": model, "sandbox": settings.Sandbox, "approvalPolicy": settings.ApprovalPolicy, "approvalsReviewer": settings.ApprovalsReviewer})
 	if e != nil {
 		return Session{}, e
 	}
@@ -160,14 +165,20 @@ func (a *Codex) Start(ctx context.Context, cwd, model, mode string, h Handler) (
 	if json.Unmarshal(threadRaw, &response) != nil || response.Thread.ID == "" {
 		return Session{}, errors.New("codex did not return thread id")
 	}
-	return Session{ID: response.Thread.ID, Runtime: "codex", CWD: cwd, Model: response.Thread.Model}, nil
+	return Session{ID: response.Thread.ID, Runtime: "codex", CWD: cwd, Model: response.Thread.Model, Mode: mode}, nil
 }
 func (a *Codex) Resume(ctx context.Context, s Session, h Handler) (Session, error) {
-	_, e := a.request(ctx, "thread/resume", map[string]any{"threadId": s.ID, "cwd": s.CWD, "model": s.Model})
+	a.runMu.Lock()
+	defer a.runMu.Unlock()
+	settings := permissionSettings(s.CWD, s.Mode)
+	_, e := a.request(ctx, "thread/resume", map[string]any{"threadId": s.ID, "cwd": s.CWD, "model": s.Model, "approvalPolicy": settings.ApprovalPolicy, "approvalsReviewer": settings.ApprovalsReviewer, "sandbox": settings.Sandbox})
 	return s, e
 }
 func (a *Codex) Turn(ctx context.Context, s Session, prompt string, h Handler) (string, error) {
-	if _, e := a.request(ctx, "turn/start", map[string]any{"threadId": s.ID, "cwd": s.CWD, "model": s.Model, "input": []map[string]any{{"type": "text", "text": prompt, "text_elements": []string{}}}}); e != nil {
+	a.runMu.Lock()
+	defer a.runMu.Unlock()
+	settings := permissionSettings(s.CWD, s.Mode)
+	if _, e := a.request(ctx, "turn/start", map[string]any{"threadId": s.ID, "cwd": s.CWD, "model": s.Model, "approvalPolicy": settings.ApprovalPolicy, "approvalsReviewer": settings.ApprovalsReviewer, "sandboxPolicy": settings.SandboxPolicy, "input": []map[string]any{{"type": "text", "text": prompt, "text_elements": []string{}}}}); e != nil {
 		return "", e
 	}
 	for {
@@ -194,6 +205,18 @@ func (a *Codex) Turn(ctx context.Context, s Session, prompt string, h Handler) (
 			}
 		}
 	}
+}
+
+type codexSettings struct {
+	ApprovalPolicy, ApprovalsReviewer, Sandbox string
+	SandboxPolicy                              map[string]any
+}
+
+func permissionSettings(cwd, mode string) codexSettings {
+	if mode == "full" {
+		return codexSettings{"never", "user", "danger-full-access", map[string]any{"type": "dangerFullAccess"}}
+	}
+	return codexSettings{"on-request", map[bool]string{true: "auto_review", false: "user"}[mode == "auto"], "workspace-write", map[string]any{"type": "workspaceWrite", "writableRoots": []string{cwd}, "networkAccess": false, "excludeTmpdirEnvVar": false, "excludeSlashTmp": false}}
 }
 func (a *Codex) Interrupt(ctx context.Context, s Session) error {
 	return a.send(map[string]any{"jsonrpc": "2.0", "id": time.Now().UnixNano(), "method": "turn/interrupt", "params": map[string]any{"threadId": s.ID}})
@@ -234,22 +257,38 @@ func (a *Claude) Turn(ctx context.Context, s Session, prompt string, h Handler) 
 	if e = cmd.Start(); e != nil {
 		return "", e
 	}
-	go func() {
-		sc := bufio.NewScanner(out)
-		for sc.Scan() {
-			var v map[string]any
-			if json.Unmarshal(sc.Bytes(), &v) == nil {
-				b, _ := json.Marshal(v)
-				h(Event{Method: "claude/event", Params: b})
-			}
-		}
-	}()
 	b, _ := json.Marshal(map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": prompt}})
 	_, e = in.Write(append(b, '\n'))
 	if e != nil {
 		return "", e
 	}
-	return fmt.Sprintf("turn-%d", time.Now().UnixNano()), nil
+	_ = in.Close()
+	result := ""
+	sc := bufio.NewScanner(out)
+	for sc.Scan() {
+		var v map[string]any
+		if json.Unmarshal(sc.Bytes(), &v) != nil {
+			continue
+		}
+		if x, ok := v["result"].(string); ok && x != "" {
+			result = x
+		}
+		if h != nil {
+			b, _ := json.Marshal(v)
+			if e := h(Event{Method: "claude/event", Params: b}); e != nil {
+				_ = cmd.Process.Kill()
+				return "", e
+			}
+		}
+	}
+	if e := sc.Err(); e != nil {
+		_ = cmd.Process.Kill()
+		return "", e
+	}
+	if e := cmd.Wait(); e != nil {
+		return result, e
+	}
+	return result, nil
 }
 func (a *Claude) Interrupt(ctx context.Context, s Session) error { return nil }
 func (a *Claude) Stop() error                                    { return nil }
