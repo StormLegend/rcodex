@@ -150,7 +150,10 @@ func Discord(h Handler, c config.Channel) http.Handler {
 			http.Error(w, "forbidden", 403)
 			return
 		}
-		_ = h(r.Context(), Message{"discord", v.ChannelID, v.Member.User.ID, v.Data.Name + " " + options(v.Data.Options), v.ID, v.Token})
+		if e := h(r.Context(), Message{"discord", v.ChannelID, v.Member.User.ID, v.Data.Name + " " + options(v.Data.Options), v.ID, v.Token}); e != nil {
+			http.Error(w, "failed", 500)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		io.WriteString(w, `{"type":4,"data":{"content":"已收到，任务已进入队列"}}`)
 	})
@@ -216,7 +219,10 @@ func Feishu(h Handler, c config.Channel) http.Handler {
 			http.Error(w, "forbidden", 403)
 			return
 		}
-		_ = h(r.Context(), Message{"feishu", v.Event.Message.ChatID, v.Event.Sender.SenderID.OpenID, v.Event.Message.Content, v.Header.EventID, ""})
+		if e := h(r.Context(), Message{"feishu", v.Event.Message.ChatID, v.Event.Sender.SenderID.OpenID, v.Event.Message.Content, v.Header.EventID, ""}); e != nil {
+			http.Error(w, "failed", 500)
+			return
+		}
 		w.WriteHeader(204)
 	})
 }

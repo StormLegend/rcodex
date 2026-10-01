@@ -13,10 +13,13 @@ Implemented foundation:
   `--output-format stream-json --input-format stream-json` process boundary.
 - Workspace-root validation, bounded HTTP bodies, bearer auth, health and
   Prometheus-style metrics.
-- Feishu challenge callback, Telegram secret webhooks, Discord Ed25519
-  interaction verification; all channels require explicit user/chat allowlists.
-- Relay transport requires TLS (`wss`) outside loopback and uses a multiplexed
-  authenticated transport boundary.
+- Feishu challenge/encrypted callbacks, Telegram secret webhooks, Discord
+  Ed25519 interaction verification, and explicit user/chat allowlists.
+- Durable outbound delivery for Telegram, Discord interaction follow-ups, and
+  Feishu tenant messages with retry/backoff and dead-letter state.
+- Relay transport requires TLS (`wss`) outside loopback and uses yamux; relay
+  enrollment and peer identity rotation are intentionally isolated behind the
+  relay package.
 - Graceful shutdown, restart recovery and a `doctor`/SQLite backup path.
 
 The implementation is being developed beside the running Node gateway. It does
@@ -32,8 +35,7 @@ go run ./cmd/rcg -config /tmp/rcodex-go.json -doctor
 go run ./cmd/rcg -config /tmp/rcodex-go.json
 ```
 
-The channel handlers are webhook ingress and enqueue work into durable sessions.
-Actual bot API delivery, Relay enrollment/identity rotation, interactive
-approval transport, and the embedded production console remain in the next
-implementation slice; they must pass external bot and domain acceptance tests
-before a production cutover.
+The channel handlers enqueue work into durable sessions and the engine writes
+provider responses to the outbox. Before production cutover, run external
+acceptance tests with real bot credentials and finish the interactive approval
+transport, relay peer enrollment/rotation, and embedded console.
