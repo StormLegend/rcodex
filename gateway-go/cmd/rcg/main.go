@@ -57,7 +57,19 @@ func main() {
 	defer stop()
 	eng.Start(ctx)
 	defer eng.Stop()
-	_ = relay.New(c.Relay)
+	if c.Relay.URL != "" {
+		rm := relay.New(c.Relay)
+		go func() {
+			session, err := rm.ConnectRetry(ctx)
+			if err != nil {
+				log.Error("relay stopped", "error", err)
+				return
+			}
+			log.Info("relay connected", "id", c.Relay.ID)
+			<-ctx.Done()
+			_ = session.Close()
+		}()
+	}
 	fmt.Println("rcodex-go listening", c.Listen)
 	if e = web.Run(ctx, &web.Server{Cfg: c, Store: s, Engine: eng, Log: log}); e != nil && e.Error() != "http: Server closed" {
 		log.Error("server stopped", "error", e)

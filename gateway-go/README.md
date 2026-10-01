@@ -21,8 +21,8 @@ Implemented foundation:
   through the authenticated API; session events support cursor polling and
   Server-Sent Events.
 - Relay transport requires TLS (`wss`) outside loopback and uses yamux; relay
-  enrollment and peer identity rotation are intentionally isolated behind the
-  relay package.
+  connections use an authenticated `rcodex-relay/hello` control stream and
+  bounded reconnect backoff.
 - Graceful shutdown, restart recovery and a `doctor`/SQLite backup path.
 
 The implementation is being developed beside the running Node gateway. It does
@@ -41,4 +41,4 @@ go run ./cmd/rcg -config /tmp/rcodex-go.json
 The channel handlers enqueue work into durable sessions and the engine writes
 provider responses to the outbox. Before production cutover, run external
 acceptance tests with real bot credentials and finish relay peer
-enrollment/rotation and the embedded console.
+enrollment/rotation, stream forwarding policy, and the embedded console.
