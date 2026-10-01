@@ -1,0 +1,13 @@
+{
+  "listen": "127.0.0.1:8790",
+  "data_dir": "/home/oem/.local/state/rcodex-go",
+  "token": "${RCG_ACCESS_TOKEN}",
+  "roots": ["/home/oem/projects"],
+  "codex_command": "/home/oem/.nvm/versions/node/v24.14.0/bin/codex",
+  "claude_command": "/home/oem/.local/bin/claude",
+  "workers": 4,
+  "queue_limit": 100,
+  "turn_seconds": 600,
+  "channels": {},
+  "relay": {"url": "", "id": "", "token": "", "peers": {}}
+}

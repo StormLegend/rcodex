@@ -1,0 +1,9 @@
+.PHONY: test race vet build
+ test:
+	go test ./...
+race:
+	go test -race ./...
+vet:
+	go vet ./...
+build:
+	CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o bin/rcodex-go ./cmd/rcg

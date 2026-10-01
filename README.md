@@ -84,3 +84,13 @@ install.sh     一键安装/升级
 - 本仓库**自己的代码**（自研网关、补丁脚本、安装器、文档）采用 MIT，见 [LICENSE](LICENSE)。
 - 上游 `@rcodex-lab/gateway` 是**闭源发布的 npm 包**（package.json 无 `license` 字段，包内无 LICENSE 文件）。因此本仓库不包含、也不重新分发它的任何编译产物；安装时由 npm 从官方源拉取，补丁只在你自己机器上应用。
 - 如果上游将来提供了开源许可或授权，我们可以把完整 fork 放出来；在那之前，这个仓库是"官方包 + 我们的补丁"。
+
+## Go production track
+
+`gateway-go/` is the independent Go implementation under active production
+hardening. It runs beside the Node gateway and contains the durable SQLite
+queue/event model, Codex and Claude runtime boundaries, authenticated webhook
+ingress for Feishu/Telegram/Discord, and a TLS-only Relay transport. See
+[docs/GO-REWRITE.md](docs/GO-REWRITE.md) and
+[gateway-go/README.md](gateway-go/README.md). It is not wired to the existing
+rcodex service until external channel and Relay acceptance tests are complete.
