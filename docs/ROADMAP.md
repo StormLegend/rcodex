@@ -20,6 +20,7 @@
 - [x] 审批回执：`session-approval` 事件 + 控制台批准/拒绝 + `POST /sessions/:id/approvals/:requestId`
 - [x] 提问回执：`session-question` 事件 + 控制台选项/输入框 + `POST /sessions/:id/questions/:requestId`
 - [x] 会话恢复：网关重启后 `thread/resume` 挂回运行中的线程
+- [x] 运行时断线处理：Codex 子进程退出会结束挂起请求并标记会话失败
 - [x] 附件：上传（`/sessions/:id/attachments`），图片输入块和安全工作区存储
 - [x] 目录/文件变更视图基础接口：工作区 Git 状态和 diff；事件渲染待增强
 - [x] 模型与推理强度切换：`thread/settings/update` + 每会话记忆
@@ -35,7 +36,8 @@
 - [x] Codex 扩展只读清单（Skills / Plugins / MCP Server / Apps / Hooks）
 - [ ] 子 Agent 与线程树（`thread/fork`、subagent 事件聚合）
 - [x] 历史导入基础能力（`thread/list`、`thread/import`、`thread/items/list`、`thread/read`）
-- [ ] 历史导入增强（异步批量导入、完整分页、远端历史一致性）
+- [x] 历史导入增强（完整 `thread/items/list` 分页和重复游标保护）
+- [x] 会话列表与事件历史游标分页；事件历史采用磁盘分段存储
 - [ ] 多 profile（一套进程托管多个 `HERMES_HOME` 式的隔离环境）
 
 ## Phase 3 —— 分发与生态

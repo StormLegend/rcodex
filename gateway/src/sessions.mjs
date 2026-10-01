@@ -7,6 +7,8 @@ import {
 } from "./permissions.mjs";
 import { createRequestStore } from "./requests.mjs";
 import { newId, nowIso, trimmed } from "./util.mjs";
+import { createFilesystem } from "./filesystem.mjs";
+import { normalizeUsageSnapshot } from "./usage.mjs";
 
 const TERMINAL_STATUSES = new Set(["completed", "failed"]);
 
@@ -17,6 +19,7 @@ const TERMINAL_STATUSES = new Set(["completed", "failed"]);
     cwd: config.allowedPaths[0],
     logger,
     requestTimeoutMs: config.codexAppServerStartupTimeoutMs,
+    env: { ...process.env, ...(config.codexHome ? { CODEX_HOME: config.codexHome } : {}) },
   });
 }
 
@@ -70,6 +73,9 @@ export function createSessionManager({
   const factory = appServerFactory ?? (() => defaultAppServerFactory(config, logger));
   const requests = createRequestStore({ timeoutMs: requestTimeoutMs, logger });
   const threadToSession = new Map();
+  const files = createFilesystem({ allowedPaths: config.allowedPaths });
+  const turnsStarting = new Set();
+  const importing = new Map();
   let appServer;
   let starting;
 
@@ -80,6 +86,16 @@ export function createSessionManager({
         const client = factory();
         client.onNotification(handleNotification);
         client.onServerRequest(handleServerRequest);
+        client.onExit?.(() => {
+          if (appServer !== client) return;
+          appServer = undefined;
+          for (const [threadId, id] of threadToSession) {
+            requests.cancelForSession(id);
+            const current = store.get(id);
+            if (current && !TERMINAL_STATUSES.has(current.status)) setStatus(id, "failed", { activeTurnId: undefined, exitReason: "Codex runtime disconnected; retry to resume" });
+          }
+          threadToSession.clear();
+        });
         await client.initialize();
         appServer = client;
         starting = undefined;
@@ -125,8 +141,13 @@ export function createSessionManager({
 
     if (message.method === "thread/tokenUsage/updated") {
       const tokenUsage = params.tokenUsage ?? params.usage;
+      const timestamp = nowIso();
       const updated = store.update(sessionId, () => ({
         usage: tokenUsage && typeof tokenUsage === "object" ? tokenUsage : undefined,
+        usageHistory: [
+          ...(session.usageHistory ?? []),
+          { timestamp, usage: normalizeUsageSnapshot(tokenUsage) },
+        ].slice(-5000),
         lastUpdatedAt: nowIso(),
       }));
       if (updated) {
@@ -139,14 +160,17 @@ export function createSessionManager({
       const status = params.status?.type ?? params.status;
       const nextStatus =
         status === "systemError" ? "failed" : status === "idle" ? "completed" : status === "active" ? "running" : undefined;
-      if (nextStatus && nextStatus !== session.status) {
-        setStatus(sessionId, nextStatus, TERMINAL_STATUSES.has(nextStatus) ? { finishedAt: nowIso(), lastTurnFinishedAt: nowIso() } : {});
+      if (nextStatus && nextStatus !== session.status && !(nextStatus === "completed" && session.status === "failed")) {
+        setStatus(sessionId, nextStatus, TERMINAL_STATUSES.has(nextStatus) ? { activeTurnId: undefined, finishedAt: nowIso(), lastTurnFinishedAt: nowIso() } : {});
       }
       return;
     }
 
     if (message.method === "turn/completed") {
-      setStatus(sessionId, "completed", {
+      const turn = params.turn ?? {};
+      const failed = turn.status === "failed" || Boolean(turn.error);
+      setStatus(sessionId, failed ? "failed" : "completed", {
+        exitReason: failed ? String(turn.error?.message ?? "turn failed") : undefined,
         activeTurnId: undefined,
         finishedAt: nowIso(),
         lastTurnFinishedAt: nowIso(),
@@ -167,6 +191,7 @@ export function createSessionManager({
       logger.warn(`refusing request for an unknown thread: method=${message.method} threadId=${threadId ?? "unknown"}`);
       return false;
     }
+    const requestClient = appServer;
     const mode = session.permissionMode ?? "full";
 
     if (isApprovalRequestMethod(message.method)) {
@@ -194,17 +219,17 @@ export function createSessionManager({
         });
         const decision = await entry.promise;
         const approved = decision?.decision === "approve";
-        appServer.respond(message.id, { decision: approved ? "accept" : "decline" });
+        requestClient?.respond(message.id, { decision: approved ? "accept" : "decline" });
         bus.emit(sessionId, {
           type: "session-approval-resolved",
           payload: { sessionId, id: entry.id, decision: approved ? "approved" : "rejected", note: decision?.note },
         });
-        setStatus(sessionId, "running");
+        if (store.get(sessionId)?.status === "waiting-approval") setStatus(sessionId, "running");
         return true;
       }
 
       // auto: Codex reviews the escalation itself; full: nothing is restricted.
-      appServer.respond(message.id, { decision: "accept" });
+      requestClient?.respond(message.id, { decision: "accept" });
       bus.emit(sessionId, {
         type: "session-approval-auto",
         payload: { sessionId, mode, requestMethod: message.method, reason: payload.reason },
@@ -227,12 +252,12 @@ export function createSessionManager({
         payload: { sessionId, request: { id: entry.id, kind: "question", questions, createdAt: entry.createdAt } },
       });
       const answer = await entry.promise;
-      appServer.respond(message.id, { answers: answer?.answers ?? {} });
+      requestClient?.respond(message.id, { answers: answer?.answers ?? {} });
       bus.emit(sessionId, {
         type: "session-question-answered",
         payload: { sessionId, id: entry.id, answers: answer?.answers ?? {} },
       });
-      setStatus(sessionId, "running");
+      if (store.get(sessionId)?.status === "waiting-approval") setStatus(sessionId, "running");
       return true;
     }
 
@@ -240,7 +265,7 @@ export function createSessionManager({
   }
 
   async function createSession({ workspacePath, prompt, model, modelProvider, reasoningEffort, title, permissionMode }) {
-    const cwd = trimmed(workspacePath) || config.allowedPaths[0];
+    const cwd = (await files.resolveAllowed(trimmed(workspacePath) || config.allowedPaths[0])).path;
     const cleanPrompt = trimmed(prompt);
     if (!cleanPrompt) {
       const error = new Error("prompt is required");
@@ -252,7 +277,7 @@ export function createSessionManager({
     const client = await ensureAppServer();
     const sessionId = newId();
     const createdAt = nowIso();
-    const requestedProvider = normalizeModelProvider(modelProvider) || config.codexDefaultProvider || "custom";
+    const requestedProvider = normalizeModelProvider(modelProvider) || config.codexDefaultProvider || (config.codexProviders?.length ? config.codexProviders[0]?.provider : undefined);
     const providerEntry = (config.codexProviders ?? []).find((entry) => entry.provider === requestedProvider);
     if ((config.codexProviders ?? []).length > 0 && !providerEntry) {
       const error = new Error(`unknown model provider: ${requestedProvider}`);
@@ -333,6 +358,12 @@ export function createSessionManager({
   }
 
   async function runTurn(sessionId, prompt, attachmentIds = []) {
+    turnsStarting.add(sessionId);
+    try { return await runTurnUnlocked(sessionId, prompt, attachmentIds); }
+    finally { turnsStarting.delete(sessionId); }
+  }
+
+  async function runTurnUnlocked(sessionId, prompt, attachmentIds = []) {
     const session = store.get(sessionId);
     if (!session) {
       const error = new Error("session not found");
@@ -345,8 +376,10 @@ export function createSessionManager({
       error.statusCode = 400;
       throw error;
     }
+    if (session.canResume === false) throw Object.assign(new Error("history-only session cannot run"), { statusCode: 409, code: "history_only" });
     const settings = permissionSettingsForMode(session.permissionMode ?? "full", session.workspacePath);
     const client = await ensureAppServer();
+    if (!threadToSession.has(session.providerSessionId)) await resumeSession(sessionId);
     const requestedAttachmentIds = [...new Set(attachmentIds.map(String))];
     const selectedAttachments = (session.attachments ?? []).filter((attachment) => requestedAttachmentIds.includes(attachment.id));
     if (selectedAttachments.length !== requestedAttachmentIds.length) {
@@ -563,7 +596,9 @@ export function createSessionManager({
       error.statusCode = 404;
       throw error;
     }
-    if (["completed", "failed"].includes(session.status)) return session;
+    if (session.canResume === false) throw Object.assign(new Error("history-only session cannot resume"), { statusCode: 409, code: "history_only" });
+    if (threadToSession.has(session.providerSessionId)) return session;
+    await files.resolveAllowed(session.workspacePath);
     const settings = permissionSettingsForMode(session.permissionMode ?? "full", session.workspacePath);
     const client = await ensureAppServer();
     try {
@@ -581,6 +616,7 @@ export function createSessionManager({
       const updated = store.update(sessionId, () => ({
         providerSessionId: threadId,
         status: "running",
+        activeTurnId: undefined,
         resumeStatus: "resumed",
         lastUpdatedAt: nowIso(),
       }));
@@ -627,6 +663,14 @@ export function createSessionManager({
   }
 
   async function importSession(threadId, title) {
+    const key = trimmed(threadId);
+    if (importing.has(key)) return importing.get(key);
+    const promise = importSessionUnlocked(key, title);
+    importing.set(key, promise);
+    try { return await promise; } finally { importing.delete(key); }
+  }
+
+  async function importSessionUnlocked(threadId, title) {
     const normalizedThreadId = trimmed(threadId);
     if (!normalizedThreadId) {
       const error = new Error("threadId is required");
@@ -638,7 +682,7 @@ export function createSessionManager({
     const client = await ensureAppServer();
     const [thread, items] = await Promise.all([
       client.readThread(normalizedThreadId),
-      client.listThreadItems(normalizedThreadId).catch(() => []),
+      client.listThreadItems(normalizedThreadId),
     ]);
     if (!thread?.id) {
       const error = new Error("thread not found");
@@ -649,13 +693,11 @@ export function createSessionManager({
     const createdAt = timestampFromThread(thread.createdAt);
     const updatedAt = timestampFromThread(thread.updatedAt ?? thread.createdAt, createdAt);
     let workspacePath = config.allowedPaths[0];
+    // Imported history is read-only until the caller explicitly creates a new
+    // resumable session. This prevents a remote thread's cwd from becoming an
+    // implicit filesystem grant.
     let canResume = false;
-    try {
-      workspacePath = (await files.resolveAllowed(thread.cwd || config.allowedPaths[0])).path;
-      canResume = true;
-    } catch {
-      // Keep imported history viewable, but never resume into an unapproved path.
-    }
+    try { workspacePath = (await files.resolveAllowed(thread.cwd || config.allowedPaths[0])).path; } catch { /* history only */ }
     const session = {
       id: sessionId,
       sessionType: "development",
@@ -682,7 +724,7 @@ export function createSessionManager({
       attachments: [],
     };
     store.upsert(session);
-    threadToSession.set(thread.id, sessionId);
+    // Reading history does not acquire runtime ownership; resume lazily on first turn.
     for (const item of items) {
       const text = itemText(item);
       const type = String(item?.type ?? "");
@@ -738,7 +780,8 @@ export function createSessionManager({
       throw error;
     }
     const client = await ensureAppServer();
-    await client.interrupt(session.providerSessionId);
+    if (!session.activeTurnId) throw Object.assign(new Error("no active turn"), { statusCode: 409, code: "no_active_turn" });
+    await client.interrupt(session.providerSessionId, session.activeTurnId);
     return store.get(sessionId);
   }
 
@@ -779,6 +822,7 @@ export function createSessionManager({
   }
 
   async function shutdown() {
+    for (const session of store.list()) requests.cancelForSession(session.id);
     await appServer?.stop();
     appServer = undefined;
   }

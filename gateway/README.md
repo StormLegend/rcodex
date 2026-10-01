@@ -31,6 +31,16 @@ node src/cli.mjs service start
 已安装用户可执行 `node src/cli.mjs config` 查看脱敏后的生效配置，或用
 `node src/cli.mjs service status` 检查后台服务。
 
+0.5 版保留 SSE，同时提供游标分页和鉴权 WebSocket：
+
+```text
+GET /sessions?limit=50&after=<cursor>
+GET /sessions/:id/events/history?limit=100&before=<cursor>
+GET /ws?token=<bearer>&sessionId=<id>&after=<event-sequence>
+```
+
+事件历史使用编号分段文件保存，内存只保留最近窗口；WebSocket 会回放会话事件、处理 ping/pong，并在慢客户端造成内存增长前断开连接。
+
 向导会读取 `~/.codex/config.toml`，发现 Provider、默认模型和可用的 `env_key`，尝试从各 Provider
 的 `/models` 接口获取模型目录，生成 `~/.rcodex/gateway/gateway.env`，并创建用户级 systemd 服务。
 API key 只由 Codex 的环境变量读取，不会写入 Gateway 配置或返回给浏览器。没有网络时可加
@@ -83,7 +93,7 @@ Provider 在 `thread/start` / `thread/resume` 时绑定到会话；同一会话�
 | GET | `/filesystem/roots` | 允许访问的根目录 |
 | GET | `/filesystem/list?path=` | 列目录 |
 | GET | `/filesystem/read?path=` | 读文件（默认上限 1 MiB，超出截断） |
-| GET | `/usage` | 查看会话与全局 token 用量 |
+| GET | `/usage?range=today|week|month|last-month|all` | 按时间范围查看会话与全局 token 用量 |
 | GET/POST | `/schedules` | 查看 / 创建持久化定时任务（once / interval） |
 | GET | `/schedule-runs?scheduleId=` | 查看任务执行记录 |
 | POST | `/schedules/:id/pause` | 暂停任务 |
@@ -105,6 +115,7 @@ Provider 在 `thread/start` / `thread/resume` 时绑定到会话；同一会话�
 
 `/healthz` 是 `/health` 的兼容别名，`/api/usage/summary` 是 `/usage` 的兼容别名。
 事件历史会持久化到 `GATEWAY_DATA_DIR/events/`，SSE 可用 `?limit=200` 控制首批回放数量。
+用量统计按 `Asia/Shanghai` 的自然日/自然周（周一开始）/自然月计算，支持 `today`、`week`、`month`、`last-month` 和 `all`；也可传 `timezone` 覆盖时区。
 
 除 `/health`、`/console`、`/auth/*` 外都需要 `Authorization: Bearer <token>`；SSE 因为
 EventSource 不能带 header，支持 `?token=`。

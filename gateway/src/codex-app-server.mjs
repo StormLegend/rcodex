@@ -23,8 +23,11 @@ export class CodexAppServer {
     this.listeners = new Set();
     this.serverRequestHandlers = new Set();
     this.child = undefined;
+    this.exitListeners = new Set();
     this.stopping = false;
   }
+
+  onExit(listener) { this.exitListeners.add(listener); return () => this.exitListeners.delete(listener); }
 
   onNotification(listener) {
     this.listeners.add(listener);
@@ -52,6 +55,16 @@ export class CodexAppServer {
       const text = String(chunk).trim();
       if (text) this.logger.debug?.("codex stderr:", text);
     });
+    let exitHandled = false;
+    const failed = (error) => {
+      if (exitHandled) return;
+      exitHandled = true;
+      this.child = undefined;
+      for (const { reject, timer } of this.pending.values()) { clearTimeout(timer); reject(error); }
+      this.pending.clear();
+      for (const fn of this.exitListeners) fn(error);
+    };
+    child.on("error", failed);
     child.on("exit", (code, signal) => {
       this.child = undefined;
       const error = new Error(`codex app-server exited (code=${code ?? "null"} signal=${signal ?? "null"})`);
@@ -60,7 +73,7 @@ export class CodexAppServer {
         reject(error);
       }
       this.pending.clear();
-      if (!this.stopping) this.logger.warn(error.message);
+      if (!this.stopping) { this.logger.warn(error.message); failed(error); }
     });
     child.stdin.on("error", () => {
       /* the exit handler reports the failure */
@@ -89,7 +102,7 @@ export class CodexAppServer {
     }
 
     if (message.method && message.id !== undefined) {
-      this.#handleServerRequest(message);
+      void this.#handleServerRequest(message);
       return;
     }
 
@@ -104,16 +117,18 @@ export class CodexAppServer {
     }
   }
 
-  #handleServerRequest(message) {
+  async #handleServerRequest(message) {
     for (const handler of this.serverRequestHandlers) {
       try {
-        if (handler(message, this) === true) return;
+        if (await handler(message, this) === true) return;
       } catch (error) {
         this.logger.warn("server request handler failed:", error?.message ?? String(error));
+        if (this.child) this.respondError(message.id, -32603, "request failed");
+        return;
       }
     }
     // No handler claimed it: refuse explicitly so Codex does not wait forever.
-    this.respondError(message.id, -32601, `unsupported server request: ${message.method}`);
+    if (this.child) this.respondError(message.id, -32601, `unsupported server request: ${message.method}`);
   }
 
   send(payload) {
@@ -185,9 +200,18 @@ export class CodexAppServer {
     return response?.thread ?? response;
   }
 
-  async listThreadItems(threadId, limit = 500) {
-    const response = await this.request("thread/items/list", { threadId, limit: Math.min(500, limit), sortDirection: "asc" });
-    return response?.data ?? [];
+  async listThreadItems(threadId, limit = 100000) {
+    const items = [], seen = new Set();
+    let cursor;
+    do {
+      const response = await this.request("thread/items/list", { threadId, cursor, limit: Math.min(500, limit - items.length), sortDirection: "asc" });
+      items.push(...(response?.data ?? []));
+      cursor = response?.nextCursor;
+      if (cursor && seen.has(cursor)) throw new Error("thread items pagination repeated a cursor");
+      if (cursor) seen.add(cursor);
+    } while (cursor && items.length < limit);
+    if (cursor) throw new Error("thread exceeds import item limit; history was not imported");
+    return items;
   }
 
   async listSkills(cwd, forceReload = false) {
@@ -283,8 +307,8 @@ export class CodexAppServer {
     return response?.turn?.id ?? response?.turnId;
   }
 
-  async interrupt(threadId) {
-    await this.request("turn/interrupt", { threadId });
+  async interrupt(threadId, turnId) {
+    await this.request("turn/interrupt", { threadId, turnId });
   }
 
   async steerTurn(threadId, turnId, prompt, attachments = []) {
@@ -296,7 +320,7 @@ export class CodexAppServer {
         input.push({ type: "text", text: `\n[附件: ${attachment.name}]\n${attachment.content ?? attachment.path}\n`, text_elements: [] });
       }
     }
-    const response = await this.request("turn/steer", { threadId, turnId, input });
+    const response = await this.request("turn/steer", { threadId, expectedTurnId: turnId, input });
     return response?.turn?.id ?? response?.turnId;
   }
 

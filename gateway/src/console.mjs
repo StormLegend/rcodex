@@ -65,6 +65,12 @@ export function renderConsoleHtml({ gatewayName, version }) {
     </div>
     <div id="sessions"></div>
     <div id="sessionAttachments" class="muted" style="margin-top:12px"></div>
+    <div style="margin-top:16px;border-top:1px solid #1e2a44;padding-top:10px">
+      <div class="row"><b>Token 用量</b><select id="usageRange" style="margin-left:auto">
+        <option value="today">当天</option><option value="week">本周</option><option value="month">本月</option><option value="last-month">上月</option><option value="all">全部</option>
+      </select></div>
+      <div id="usageSummary" class="muted">加载中…</div>
+    </div>
   </aside>
   <section id="detail">
     <div id="log" class="muted">选择一个会话，或在左上角新建。</div>
@@ -208,7 +214,7 @@ async function doLogin() {
     localStorage.setItem("rcodex-gateway-token", token);
     document.getElementById("login").style.display = "none";
     document.getElementById("app").style.display = "grid";
-    await Promise.all([loadModels(), loadSessions()]);
+    await Promise.all([loadModels(), loadSessions(), loadUsageSummary()]);
   } catch (error) {
     document.getElementById("loginError").textContent = String(error.message || error);
     await loadCaptcha();
@@ -226,6 +232,13 @@ async function loadSessions() {
     el.onclick = () => openSession(session.id);
     list.appendChild(el);
   }
+}
+
+async function loadUsageSummary() {
+  const range = document.getElementById("usageRange").value;
+  const data = await api("/usage?range=" + encodeURIComponent(range));
+  const totals = data.totals || {};
+  document.getElementById("usageSummary").textContent = "输入 " + (totals.inputTokens || 0) + " · 输出 " + (totals.outputTokens || 0) + " · 总计 " + (totals.totalTokens || 0);
 }
 
 async function loadModels() {
@@ -376,12 +389,13 @@ document.addEventListener("keydown", (event) => {
 
 document.getElementById("model").addEventListener("change", () => applyRuntimeConfig().catch(() => {}));
 document.getElementById("reasoning").addEventListener("change", () => applyRuntimeConfig().catch(() => {}));
+document.getElementById("usageRange").addEventListener("change", () => loadUsageSummary().catch(() => {}));
 
 if (token) {
   api("/sessions").then(() => {
     document.getElementById("login").style.display = "none";
     document.getElementById("app").style.display = "grid";
-    return Promise.all([loadModels(), loadSessions()]);
+    return Promise.all([loadModels(), loadSessions(), loadUsageSummary()]);
   }).catch(() => { token = ""; loadCaptcha(); });
 } else {
   loadCaptcha();

@@ -8,6 +8,8 @@ import { createFilesystem } from "./filesystem.mjs";
 import { createSessionStore } from "./session-store.mjs";
 import { createSessionManager } from "./sessions.mjs";
 import { createScheduleService } from "./schedules.mjs";
+import { aggregateUsage } from "./usage.mjs";
+import { attachWebSocket } from "./websocket.mjs";
 import { nowIso, readJsonBody, sendError, sendJson } from "./util.mjs";
 
 function matchSessionChild(pathname, suffix) {
@@ -135,7 +137,22 @@ export function createGatewayServer({ config, logger }) {
       return true;
     }
     if (req.method === "GET" && pathname === "/sessions") {
-      sendJson(res, 200, { sessions: store.list() });
+      const paged = searchParams?.has("limit") || searchParams?.has("before") || searchParams?.has("after");
+      if (paged) sendJson(res, 200, store.listPage({ limit: searchParams.get("limit"), before: searchParams.get("before") ?? undefined, after: searchParams.get("after") ?? undefined }));
+      else sendJson(res, 200, { sessions: store.list() });
+      return true;
+    }
+    const eventHistorySessionId = matchSessionChild(pathname, "/events/history");
+    if (req.method === "GET" && eventHistorySessionId) {
+      if (!store.get(eventHistorySessionId)) {
+        sendError(res, 404, "session not found", "not_found");
+        return true;
+      }
+      sendJson(res, 200, bus.historyPage(eventHistorySessionId, {
+        limit: searchParams?.get("limit"),
+        before: searchParams?.get("before") ?? undefined,
+        after: searchParams?.get("after") ?? undefined,
+      }));
       return true;
     }
     if (req.method === "POST" && pathname === "/sessions") {
@@ -188,17 +205,10 @@ export function createGatewayServer({ config, logger }) {
       return true;
     }
     if (req.method === "GET" && (pathname === "/usage" || pathname === "/api/usage/summary")) {
-      const sessions = store.list();
-      const totals = sessions.reduce((result, session) => {
-        const usage = session.usage ?? {};
-        const total = usage.total ?? usage;
-        for (const key of ["inputTokens", "outputTokens", "cachedInputTokens", "reasoningTokens", "totalTokens"]) {
-          const value = Number(total?.[key] ?? usage?.[key] ?? 0);
-          if (Number.isFinite(value)) result[key] = (result[key] ?? 0) + value;
-        }
-        return result;
-      }, {});
-      sendJson(res, 200, { sessions: sessions.map(({ id, title, usage }) => ({ id, title, usage })), totals });
+      sendJson(res, 200, aggregateUsage(store.list(), {
+        range: searchParams?.get("range") || "all",
+        timezone: searchParams?.get("timezone") || "Asia/Shanghai",
+      }));
       return true;
     }
     const resumeSessionId = matchSessionChild(pathname, "/resume");
@@ -411,10 +421,12 @@ export function createGatewayServer({ config, logger }) {
       else res.end();
     }
   });
+  const websocket = attachWebSocket(server, { config, bus, store });
 
   async function close() {
     schedules.stop();
     await sessions.shutdown();
+    websocket.close();
     await new Promise((resolve) => server.close(resolve));
   }
 

@@ -18,11 +18,11 @@
 | 定时任务 cron/Webhook 投递 | 已完成基础版 | 中 | 支持五字段 cron 和通用 Webhook；失败重试/第三方渠道待增强 |
 | 通知渠道（Webhook） | 已完成基础版 | 中 | 核心只依赖 HTTP；iLink/飞书等继续走插件隔离 |
 | Plugins/MCP/Skills/Apps/Hooks 只读清单 | 已完成基础版 | 中 | 通过 app-server 读取和刷新状态；安装/启停仍待权限设计 |
-| 历史导入与完整分页 | 已完成基础版 | 高 | `thread/list`、`thread/read`、`thread/items/list` 导入和最近事件回放；完整远端分页待增强 |
-| WebSocket Console 通道 | 未完成 | 中 | SSE 已够用；需要 App 兼容性测试后再引入 |
+| 历史导入与完整分页 | 已完成基础版 | 高 | `thread/items/list` 完整分页、重复游标保护，会话和事件 API 支持游标分页；导入会话默认只读 |
+| WebSocket Console 通道 | 已完成基础版 | 中 | `/ws` 支持鉴权、会话过滤、事件回放、ping/pong 和慢客户端断开；官方双向协议兼容仍待测试 |
 | QR 配对 | 未完成 | 低 | 先稳定 Bearer + 反向代理部署 |
 | Claude Code Runtime | 未完成 | 中 | 应作为独立后端，不伪装成 Codex Provider |
-| 更新器、诊断、可观测性 | 部分完成 | 中 | 已有健康/用量；自动更新和指标待实现 |
+| 更新器、诊断、可观测性 | 部分完成 | 中 | 已有健康、按日/周/月用量和基础指标；自动更新和完整诊断待实现 |
 | 自动配置与用户级服务 | 已完成基础版 | 必须 | `setup` 自动读取 Codex 配置、发现模型、生成 env 和 systemd 服务 |
 
 ## 替代判断
