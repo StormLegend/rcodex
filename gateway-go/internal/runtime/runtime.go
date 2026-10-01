@@ -122,6 +122,16 @@ func (a *adapter) startProcess(ctx context.Context, cwd string) (*bufio.Scanner,
 	if e = a.proc.Start(); e != nil {
 		return nil, e
 	}
+	proc := a.proc
+	go func() {
+		_ = proc.Wait()
+		a.mu.Lock()
+		if a.proc == proc {
+			a.proc = nil
+			a.stdin = nil
+		}
+		a.mu.Unlock()
+	}()
 	a.scanner = bufio.NewScanner(out)
 	return a.scanner, nil
 }
