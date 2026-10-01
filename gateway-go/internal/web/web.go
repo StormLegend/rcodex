@@ -90,7 +90,13 @@ func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method == "POST" {
-		var v struct{ Runtime, Workspace, Model, Mode, Title string }
+		var v struct {
+			Runtime   string `json:"runtime"`
+			Workspace string `json:"workspace"`
+			Model     string `json:"model"`
+			Mode      string `json:"mode"`
+			Title     string `json:"title"`
+		}
 		if json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&v) != nil {
 			s.writeErr(w, errors.New("invalid body"))
 			return
@@ -190,9 +196,22 @@ func (s *Server) turns(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	var v struct{ SessionID, Prompt, IdempotencyKey, Notify string }
+	var v struct {
+		SessionID      string `json:"session_id"`
+		Prompt         string `json:"prompt"`
+		IdempotencyKey string `json:"idempotency_key"`
+		Notify         string `json:"notify"`
+	}
 	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&v) != nil {
 		s.writeErr(w, errors.New("invalid body"))
+		return
+	}
+	if v.SessionID == "" || v.Prompt == "" {
+		s.writeErr(w, errors.New("session_id and prompt are required"))
+		return
+	}
+	if _, e := s.Store.Session(v.SessionID); e != nil {
+		s.writeErr(w, e)
 		return
 	}
 	t, e := s.Store.Enqueue(v.SessionID, v.Prompt, v.IdempotencyKey, v.Notify, s.Cfg.QueueLimit)
