@@ -38,6 +38,10 @@ go run ./cmd/rcg -config /tmp/rcodex-go.json -doctor
 go run ./cmd/rcg -config /tmp/rcodex-go.json
 ```
 
+On macOS, use `deploy/com.stormlegend.rcodex-go.plist` with `launchctl
+bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.stormlegend.rcodex-go.plist`.
+Linux deployments can use `deploy/rcodex-go.service`.
+
 The channel handlers enqueue work into durable sessions and the engine writes
 provider responses to the outbox. Before production cutover, run external
 acceptance tests with real bot credentials and finish relay peer
