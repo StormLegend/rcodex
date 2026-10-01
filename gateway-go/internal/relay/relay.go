@@ -9,6 +9,7 @@ import (
 	"github.com/StormLegend/rcodex/gateway-go/internal/config"
 	"github.com/hashicorp/yamux"
 	"net"
+	"net/http"
 	"net/url"
 	"strings"
 	"time"
@@ -121,4 +122,31 @@ func (m *Manager) ConnectRetry(ctx context.Context) (*yamux.Session, error) {
 			delay *= 2
 		}
 	}
+}
+
+type sessionListener struct{ session *yamux.Session }
+
+func (l sessionListener) Accept() (net.Conn, error) { return l.session.Accept() }
+func (l sessionListener) Close() error              { return l.session.Close() }
+func (l sessionListener) Addr() net.Addr            { return relayAddr("yamux") }
+
+type relayAddr string
+
+func (a relayAddr) Network() string { return "rcodex-relay" }
+func (a relayAddr) String() string  { return string(a) }
+
+// ServeHTTP exposes the supplied authenticated gateway handler to incoming
+// relay streams. The relay server is responsible for mapping its public
+// endpoint to yamux streams; each stream carries a normal HTTP/1.1 exchange.
+func ServeHTTP(ctx context.Context, session *yamux.Session, handler http.Handler) error {
+	if session == nil {
+		return errors.New("nil relay session")
+	}
+	server := &http.Server{Handler: handler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second}
+	go func() { <-ctx.Done(); _ = server.Close() }()
+	err := server.Serve(sessionListener{session})
+	if errors.Is(err, http.ErrServerClosed) {
+		return nil
+	}
+	return err
 }
