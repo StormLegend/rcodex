@@ -138,8 +138,11 @@ func Load(file string) (Config, error) {
 		if ch.Runtime != "codex" && ch.Runtime != "claude" {
 			return c, errors.New("invalid channel runtime")
 		}
-		if ch.Mode != "readonly" && ch.Mode != "ask" {
-			return c, errors.New("channels support readonly or ask; full access is disabled")
+		if ch.Mode != "readonly" && ch.Mode != "ask" && ch.Mode != "auto" && ch.Mode != "full" {
+			return c, errors.New("invalid channel permission mode")
+		}
+		if ch.Mode == "full" && !c.AllowFull {
+			return c, errors.New("full access requires allow_full")
 		}
 		if name == "telegram" && (len(ch.Secret) < 32 || ch.Token == "") {
 			return c, errors.New("telegram requires token and >=32 character secret")

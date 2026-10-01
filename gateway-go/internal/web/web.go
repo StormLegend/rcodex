@@ -98,6 +98,18 @@ func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
 		if v.Mode == "" {
 			v.Mode = "ask"
 		}
+		if v.Runtime != "codex" && v.Runtime != "claude" {
+			s.writeErr(w, errors.New("unsupported runtime"))
+			return
+		}
+		if v.Mode != "readonly" && v.Mode != "ask" && v.Mode != "auto" && v.Mode != "full" {
+			s.writeErr(w, errors.New("invalid permission mode"))
+			return
+		}
+		if v.Mode == "full" && !s.Cfg.AllowFull {
+			s.writeErr(w, errors.New("full access is disabled"))
+			return
+		}
 		if _, e := s.Cfg.Workspace(v.Workspace); e != nil {
 			s.writeErr(w, e)
 			return
