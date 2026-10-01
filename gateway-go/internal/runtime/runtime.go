@@ -101,6 +101,7 @@ func (a *adapter) request(ctx context.Context, method string, params any) (json.
 		return msg.Result, nil
 	}
 }
+
 func (a *adapter) startProcess(ctx context.Context, cwd string) (*bufio.Scanner, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -165,7 +166,11 @@ func (a *Codex) Start(ctx context.Context, cwd, model, mode string, h Handler) (
 		return Session{}, e
 	}
 	settings := permissionSettings(cwd, mode)
-	threadRaw, e := a.request(ctx, "thread/start", map[string]any{"cwd": cwd, "model": model, "sandbox": settings.Sandbox, "approvalPolicy": settings.ApprovalPolicy, "approvalsReviewer": settings.ApprovalsReviewer})
+	params := map[string]any{"cwd": cwd, "sandbox": settings.Sandbox, "approvalPolicy": settings.ApprovalPolicy, "approvalsReviewer": settings.ApprovalsReviewer}
+	if model != "" {
+		params["model"] = model
+	}
+	threadRaw, e := a.request(ctx, "thread/start", params)
 	if e != nil {
 		return Session{}, e
 	}
@@ -184,14 +189,22 @@ func (a *Codex) Resume(ctx context.Context, s Session, h Handler) (Session, erro
 	a.runMu.Lock()
 	defer a.runMu.Unlock()
 	settings := permissionSettings(s.CWD, s.Mode)
-	_, e := a.request(ctx, "thread/resume", map[string]any{"threadId": s.ID, "cwd": s.CWD, "model": s.Model, "approvalPolicy": settings.ApprovalPolicy, "approvalsReviewer": settings.ApprovalsReviewer, "sandbox": settings.Sandbox})
+	params := map[string]any{"threadId": s.ID, "cwd": s.CWD, "approvalPolicy": settings.ApprovalPolicy, "approvalsReviewer": settings.ApprovalsReviewer, "sandbox": settings.Sandbox}
+	if s.Model != "" {
+		params["model"] = s.Model
+	}
+	_, e := a.request(ctx, "thread/resume", params)
 	return s, e
 }
 func (a *Codex) Turn(ctx context.Context, s Session, prompt string, h Handler) (string, error) {
 	a.runMu.Lock()
 	defer a.runMu.Unlock()
 	settings := permissionSettings(s.CWD, s.Mode)
-	if _, e := a.request(ctx, "turn/start", map[string]any{"threadId": s.ID, "cwd": s.CWD, "model": s.Model, "approvalPolicy": settings.ApprovalPolicy, "approvalsReviewer": settings.ApprovalsReviewer, "sandboxPolicy": settings.SandboxPolicy, "input": []map[string]any{{"type": "text", "text": prompt, "text_elements": []string{}}}}); e != nil {
+	params := map[string]any{"threadId": s.ID, "cwd": s.CWD, "approvalPolicy": settings.ApprovalPolicy, "approvalsReviewer": settings.ApprovalsReviewer, "sandboxPolicy": settings.SandboxPolicy, "input": []map[string]any{{"type": "text", "text": prompt, "text_elements": []string{}}}}
+	if s.Model != "" {
+		params["model"] = s.Model
+	}
+	if _, e := a.request(ctx, "turn/start", params); e != nil {
 		return "", e
 	}
 	for {
