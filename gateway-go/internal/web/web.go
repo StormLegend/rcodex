@@ -23,6 +23,8 @@ type Server struct {
 	Log    *slog.Logger
 }
 
+var Version = "0.1.0-go"
+
 func (s *Server) Handler() http.Handler {
 	m := http.NewServeMux()
 	m.HandleFunc("/healthz", s.health)
@@ -71,7 +73,7 @@ func auth(c config.Config, next http.Handler) http.Handler {
 	})
 }
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {
-	s.write(w, 200, map[string]any{"ok": true, "version": "0.1.0-go", "stats": s.Store.Stats()})
+	s.write(w, 200, map[string]any{"ok": true, "version": Version, "stats": s.Store.Stats()})
 }
 func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 	st := s.Store.Stats()
