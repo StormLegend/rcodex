@@ -17,6 +17,9 @@ Implemented foundation:
   Ed25519 interaction verification, and explicit user/chat allowlists.
 - Durable outbound delivery for Telegram, Discord interaction follow-ups, and
   Feishu tenant messages with retry/backoff and dead-letter state.
+- Codex approval and question requests are persisted and can be resolved
+  through the authenticated API; session events support cursor polling and
+  Server-Sent Events.
 - Relay transport requires TLS (`wss`) outside loopback and uses yamux; relay
   enrollment and peer identity rotation are intentionally isolated behind the
   relay package.
@@ -37,5 +40,5 @@ go run ./cmd/rcg -config /tmp/rcodex-go.json
 
 The channel handlers enqueue work into durable sessions and the engine writes
 provider responses to the outbox. Before production cutover, run external
-acceptance tests with real bot credentials and finish the interactive approval
-transport, relay peer enrollment/rotation, and embedded console.
+acceptance tests with real bot credentials and finish relay peer
+enrollment/rotation and the embedded console.
