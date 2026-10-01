@@ -133,6 +133,10 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request) {
 		s.writeErr(w, e)
 		return
 	}
+	if len(parts) > 2 && parts[1] == "events" && parts[2] == "stream" {
+		s.eventStream(w, r, id)
+		return
+	}
 	if len(parts) > 1 && parts[1] == "events" {
 		after, _ := strconv.ParseInt(r.URL.Query().Get("after"), 10, 64)
 		before, _ := strconv.ParseInt(r.URL.Query().Get("before"), 10, 64)
@@ -145,6 +149,38 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.write(w, 200, map[string]any{"session": v})
+}
+func (s *Server) eventStream(w http.ResponseWriter, r *http.Request, sessionID string) {
+	f, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "stream unsupported", 500)
+		return
+	}
+	after, _ := strconv.ParseInt(r.URL.Query().Get("after"), 10, 64)
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	ticker := time.NewTicker(300 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		events, err := s.Store.Events(sessionID, after, 0, 100)
+		if err != nil {
+			return
+		}
+		for _, ev := range events {
+			b, _ := json.Marshal(ev)
+			_, _ = w.Write([]byte("id: " + strconv.FormatInt(ev.ID, 10) + "\ndata: " + string(b) + "\n\n"))
+			after = ev.ID
+		}
+		if len(events) > 0 {
+			f.Flush()
+		}
+		select {
+		case <-r.Context().Done():
+			return
+		case <-ticker.C:
+		}
+	}
 }
 func (s *Server) turns(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" {
@@ -202,8 +238,9 @@ func (s *Server) approval(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Method == http.MethodPost {
 		var v struct {
-			Approved bool   `json:"approved"`
-			Reason   string `json:"reason"`
+			Approved bool           `json:"approved"`
+			Reason   string         `json:"reason"`
+			Answers  map[string]any `json:"answers,omitempty"`
 		}
 		if json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&v) != nil {
 			s.writeErr(w, errors.New("invalid body"))

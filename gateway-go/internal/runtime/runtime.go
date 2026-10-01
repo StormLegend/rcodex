@@ -15,8 +15,11 @@ import (
 )
 
 type Event struct {
-	Method string
-	Params json.RawMessage
+	ID           json.RawMessage
+	Method       string
+	Params       json.RawMessage
+	Respond      func(any) error
+	RespondError func(int, string) error
 }
 type Request struct {
 	ID     any
@@ -191,12 +194,22 @@ func (a *Codex) Turn(ctx context.Context, s Session, prompt string, h Handler) (
 			return "", errors.New("codex exited")
 		}
 		var msg struct {
+			ID     json.RawMessage `json:"id"`
 			Method string          `json:"method"`
 			Params json.RawMessage `json:"params"`
 		}
 		if json.Unmarshal(a.scanner.Bytes(), &msg) == nil && msg.Method != "" {
 			if h != nil {
-				if e := h(Event{Method: msg.Method, Params: msg.Params}); e != nil {
+				ev := Event{ID: msg.ID, Method: msg.Method, Params: msg.Params}
+				if len(msg.ID) > 0 && string(msg.ID) != "null" {
+					ev.Respond = func(v any) error {
+						return a.send(map[string]any{"jsonrpc": "2.0", "id": json.RawMessage(msg.ID), "result": v})
+					}
+					ev.RespondError = func(code int, message string) error {
+						return a.send(map[string]any{"jsonrpc": "2.0", "id": json.RawMessage(msg.ID), "error": map[string]any{"code": code, "message": message}})
+					}
+				}
+				if e := h(ev); e != nil {
 					return "", e
 				}
 			}
