@@ -207,6 +207,7 @@ func (a *Codex) Turn(ctx context.Context, s Session, prompt string, h Handler) (
 	if _, e := a.request(ctx, "turn/start", params); e != nil {
 		return "", e
 	}
+	resultText := ""
 	for {
 		select {
 		case <-ctx.Done():
@@ -222,6 +223,25 @@ func (a *Codex) Turn(ctx context.Context, s Session, prompt string, h Handler) (
 			Params json.RawMessage `json:"params"`
 		}
 		if json.Unmarshal(a.scanner.Bytes(), &msg) == nil && msg.Method != "" {
+			if msg.Method == "item/agentMessage/delta" {
+				var delta struct {
+					Delta string `json:"delta"`
+				}
+				if json.Unmarshal(msg.Params, &delta) == nil {
+					resultText += delta.Delta
+				}
+			}
+			if msg.Method == "item/completed" && resultText == "" {
+				var completed struct {
+					Item struct {
+						Type string `json:"type"`
+						Text string `json:"text"`
+					} `json:"item"`
+				}
+				if json.Unmarshal(msg.Params, &completed) == nil && completed.Item.Type == "agentMessage" {
+					resultText = completed.Item.Text
+				}
+			}
 			if h != nil {
 				ev := Event{ID: msg.ID, Method: msg.Method, Params: msg.Params}
 				if len(msg.ID) > 0 && string(msg.ID) != "null" {
@@ -237,6 +257,9 @@ func (a *Codex) Turn(ctx context.Context, s Session, prompt string, h Handler) (
 				}
 			}
 			if msg.Method == "turn/completed" || msg.Method == "thread/status/changed" && strings.Contains(string(msg.Params), `"idle"`) {
+				if resultText != "" {
+					return resultText, nil
+				}
 				return fmt.Sprintf("turn-%d", time.Now().UnixNano()), nil
 			}
 		}
