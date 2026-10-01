@@ -72,9 +72,15 @@ func Discord(h Handler, c config.Channel) http.Handler {
 			http.Error(w, "body", 400)
 			return
 		}
+		ts := r.Header.Get("X-Signature-Timestamp")
+		stamp, te := strconv.ParseInt(ts, 10, 64)
+		if te != nil || abs(time.Now().Unix()-stamp) > 300 {
+			http.Error(w, "stale signature", 401)
+			return
+		}
 		pub, e := hex.DecodeString(c.PublicKey)
 		sig, e2 := hex.DecodeString(r.Header.Get("X-Signature-Ed25519"))
-		if e != nil || e2 != nil || len(pub) != ed25519.PublicKeySize || !ed25519.Verify(ed25519.PublicKey(pub), append([]byte(r.Header.Get("X-Signature-Timestamp")), b...), sig) {
+		if e != nil || e2 != nil || len(pub) != ed25519.PublicKeySize || !ed25519.Verify(ed25519.PublicKey(pub), append([]byte(ts), b...), sig) {
 			http.Error(w, "invalid signature", 401)
 			return
 		}
@@ -174,6 +180,13 @@ func allowed(v string, list []string) bool {
 		}
 	}
 	return false
+}
+
+func abs(v int64) int64 {
+	if v < 0 {
+		return -v
+	}
+	return v
 }
 func Signature(secret, body string) string {
 	h := sha256.Sum256([]byte(secret + body))

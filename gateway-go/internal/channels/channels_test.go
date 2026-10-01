@@ -6,8 +6,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/StormLegend/rcodex/gateway-go/internal/config"
 )
@@ -30,7 +32,7 @@ func TestDiscordPingAndSignature(t *testing.T) {
 	pub, priv, _ := ed25519.GenerateKey(nil)
 	c := config.Channel{PublicKey: hex.EncodeToString(pub), Users: []string{"7"}, Chats: []string{"9"}}
 	body := `{"type":1}`
-	ts := "1700000000"
+	ts := strconv.FormatInt(time.Now().Unix(), 10)
 	sig := ed25519.Sign(priv, append([]byte(ts), []byte(body)...))
 	r := httptest.NewRequest("POST", "/", strings.NewReader(body))
 	r.Header.Set("X-Signature-Timestamp", ts)
