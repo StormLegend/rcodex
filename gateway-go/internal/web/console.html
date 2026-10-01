@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>rcodex-go</title>
+<style>body{font:14px system-ui;margin:2rem;max-width:1100px}button,input{padding:.45rem;margin:.2rem}pre{background:#111;color:#ddd;padding:1rem;white-space:pre-wrap;max-height:60vh;overflow:auto}.row{border-bottom:1px solid #ddd;padding:.5rem}.muted{color:#666}</style>
+<h1>rcodex-go 控制台</h1>
+<label>API Token <input id="token" type="password" size="48"><button onclick="save()">保存</button></label>
+<p><button onclick="loadSessions()">刷新会话</button> <span id="status" class="muted"></span></p>
+<div id="sessions"></div><h2>实时事件</h2><pre id="events">选择会话后显示事件</pre>
+<script>
+const token=()=>document.querySelector('#token').value||localStorage.rcgToken||'';
+document.querySelector('#token').value=localStorage.rcgToken||'';
+function save(){localStorage.rcgToken=document.querySelector('#token').value;loadSessions()}
+async function api(path,opts={}){opts.headers={...(opts.headers||{}),Authorization:'Bearer '+token()};let r=await fetch(path,opts);if(!r.ok)throw Error(r.status+' '+await r.text());return r.json()}
+async function loadSessions(){try{let x=await api('/api/sessions');document.querySelector('#status').textContent=x.sessions.length+' 个会话';document.querySelector('#sessions').innerHTML=x.sessions.map(s=>`<div class="row"><b>${esc(s.title||s.id)}</b> <span class="muted">${s.runtime} · ${s.mode} · ${s.workspace}</span> <button onclick="watch('${s.id}')">查看</button></div>`).join('')}catch(e){document.querySelector('#status').textContent=e.message}}
+let watching=0;async function watch(id){let run=++watching;document.querySelector('#events').textContent='';try{let r=await fetch('/api/sessions/'+id+'/events/stream?after=0',{headers:{Authorization:'Bearer '+token()}});if(!r.ok)throw Error(r.status);let reader=r.body.getReader(),dec=new TextDecoder(),buf='';while(run===watching){let x=await reader.read();if(x.done)break;buf+=dec.decode(x.value,{stream:true});let parts=buf.split('\n\n');buf=parts.pop();for(let p of parts){let line=p.split('\n').find(x=>x.startsWith('data: '));if(line){document.querySelector('#events').textContent+=line.slice(6)+'\n';let el=document.querySelector('#events');el.scrollTop=el.scrollHeight}}}}catch(e){if(run===watching)document.querySelector('#status').textContent='事件流已断开: '+e.message}}
+function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+</script>

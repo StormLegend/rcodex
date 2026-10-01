@@ -26,12 +26,15 @@ type Server struct {
 func (s *Server) Handler() http.Handler {
 	m := http.NewServeMux()
 	m.HandleFunc("/healthz", s.health)
+	m.HandleFunc("/console", console)
+	m.HandleFunc("/console/", console)
 	m.HandleFunc("/metrics", s.metrics)
 	m.HandleFunc("/api/sessions", s.sessions)
 	m.HandleFunc("/api/sessions/", s.session)
 	m.HandleFunc("/api/turns", s.turns)
 	m.HandleFunc("/api/turns/", s.turn)
 	m.HandleFunc("/api/approvals/", s.approval)
+	m.HandleFunc("/api/approvals", s.approvals)
 	if c, ok := s.Cfg.Channels["telegram"]; ok {
 		m.Handle("/webhooks/telegram", channels.Telegram(s.channelMessage, c))
 	}
@@ -55,7 +58,7 @@ func (s *Server) channelMessage(ctx context.Context, m channels.Message) error {
 }
 func auth(c config.Config, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/healthz" || strings.HasPrefix(r.URL.Path, "/webhooks/") {
+		if r.URL.Path == "/healthz" || r.URL.Path == "/console" || strings.HasPrefix(r.URL.Path, "/console/") || strings.HasPrefix(r.URL.Path, "/webhooks/") {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -254,6 +257,18 @@ func (s *Server) approval(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.NotFound(w, r)
+}
+func (s *Server) approvals(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.NotFound(w, r)
+		return
+	}
+	items, e := s.Store.Approvals(r.URL.Query().Get("state"), 100)
+	if e != nil {
+		s.writeErr(w, e)
+		return
+	}
+	s.write(w, 200, map[string]any{"approvals": items})
 }
 func (s *Server) write(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")

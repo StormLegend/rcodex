@@ -322,6 +322,31 @@ func (s *Store) Approval(id string) (Approval, error) {
 	e := s.DB.QueryRow(`SELECT * FROM approvals WHERE id=?`, id).Scan(&v.ID, &v.SessionID, &v.TurnID, &v.Request, &v.Response, &v.State, &v.Created)
 	return v, e
 }
+func (s *Store) Approvals(state string, limit int) ([]Approval, error) {
+	if limit < 1 || limit > 500 {
+		limit = 100
+	}
+	q := `SELECT * FROM approvals ORDER BY created DESC LIMIT ?`
+	args := []any{limit}
+	if state != "" {
+		q = `SELECT * FROM approvals WHERE state=? ORDER BY created DESC LIMIT ?`
+		args = []any{state, limit}
+	}
+	rows, e := s.DB.Query(q, args...)
+	if e != nil {
+		return nil, e
+	}
+	defer rows.Close()
+	out := []Approval{}
+	for rows.Next() {
+		var v Approval
+		if e = rows.Scan(&v.ID, &v.SessionID, &v.TurnID, &v.Request, &v.Response, &v.State, &v.Created); e != nil {
+			return nil, e
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}
 func (s *Store) Resolve(id string, response any) error {
 	res, e := s.DB.Exec(`UPDATE approvals SET response=?,state='resolved' WHERE id=? AND state='pending'`, JSON(response), id)
 	if e != nil {
