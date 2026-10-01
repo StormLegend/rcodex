@@ -53,10 +53,20 @@ func (e *Engine) run(parent context.Context, t store.Turn) {
 		if rt == nil {
 			err = errors.New("runtime unavailable")
 		} else {
-			rs, er := rt.Start(ctx, s.Workspace, s.Model, s.Mode, nil)
+			var rs runtime.Session
+			var er error
+			if s.NativeID != "" {
+				rs = runtime.Session{ID: s.NativeID, Runtime: s.Runtime, CWD: s.Workspace, Model: s.Model}
+				rs, er = rt.Resume(ctx, rs, nil)
+			} else {
+				rs, er = rt.Start(ctx, s.Workspace, s.Model, s.Mode, nil)
+			}
 			if er != nil {
 				err = er
 			} else {
+				if rs.ID != "" {
+					_ = e.Store.Native(s.ID, rs.ID)
+				}
 				_, err = rt.Turn(ctx, rs, t.Prompt, func(ev runtime.Event) error {
 					_, err := e.Store.Event(t.SessionID, t.ID, ev.Method, ev.Params)
 					return err
