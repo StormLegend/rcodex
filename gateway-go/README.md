@@ -20,9 +20,9 @@ Implemented foundation:
 - Codex approval and question requests are persisted and can be resolved
   through the authenticated API; session events support cursor polling and
   Server-Sent Events.
-- Relay transport requires TLS (`wss`) outside loopback and uses yamux; relay
-  connections use an authenticated `rcodex-relay/hello` control stream and
-  bounded reconnect backoff.
+- Relay transport uses a real WebSocket (`wss`) outside loopback, with yamux
+  inside the WebSocket and an authenticated `rcodex-relay/hello` control
+  stream. Gateway connections use bounded reconnect backoff.
 - The standalone `rcg-relay` edge server accepts one authenticated connector
   per gateway and forwards authenticated client HTTP streams. `rcgctl` can use
   the same path with `-relay-url`, `-gateway`, and `-relay-token`.

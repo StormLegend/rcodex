@@ -6,12 +6,47 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/StormLegend/rcodex/gateway-go/internal/config"
 	"github.com/hashicorp/yamux"
 )
+
+func TestWebSocketRelayTransport(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	server := NewServer(ServerConfig{Listen: "127.0.0.1:0", Peers: map[string]Peer{
+		"gw-ws": {ConnectorToken: "connector-token-ws-012345678901234567", AccessToken: "access-token-ws-012345678901234567"},
+	}})
+	httpServer := httptest.NewServer(server.WebSocketHandler(ctx))
+	defer httpServer.Close()
+	wsURL := "ws" + strings.TrimPrefix(httpServer.URL, "http")
+	agent := New(config.Relay{URL: wsURL, ID: "gw-ws", Token: "connector-token-ws-012345678901234567"})
+	agentSession, err := agent.ConnectAuthenticated(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer agentSession.Close()
+	go func() {
+		_ = ServeHTTP(ctx, agentSession, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte("websocket-ok"))
+		}))
+	}()
+	transport := NewGatewayTransport(wsURL, "gw-ws", "access-token-ws-012345678901234567")
+	defer transport.Close()
+	response, err := (&http.Client{Transport: transport}).Get("http://gateway/healthz")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := io.ReadAll(response.Body)
+	_ = response.Body.Close()
+	if err != nil || response.StatusCode != http.StatusOK || string(body) != "websocket-ok" {
+		t.Fatalf("status=%d body=%q err=%v", response.StatusCode, body, err)
+	}
+}
 
 func TestRelayForwardsMobileHTTPToGateway(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")

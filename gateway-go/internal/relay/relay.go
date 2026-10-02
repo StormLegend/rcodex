@@ -3,17 +3,18 @@ package relay
 import (
 	"bufio"
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"errors"
-	"github.com/StormLegend/rcodex/gateway-go/internal/config"
-	"github.com/hashicorp/yamux"
 	"net"
 	"net/http"
 	"net/url"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/StormLegend/rcodex/gateway-go/internal/config"
+	"github.com/coder/websocket"
+	"github.com/hashicorp/yamux"
 )
 
 type Manager struct {
@@ -27,17 +28,14 @@ func New(c config.Relay) *Manager {
 		if e != nil {
 			return nil, e
 		}
-		// The gateway transport is TLS-wrapped TCP plus yamux. `wss` is kept
-		// as the public config scheme for backwards compatibility; mobile and
-		// browser clients should use ServerConfig.HTTPListen instead.
 		if x.Scheme != "wss" && !(x.Scheme == "ws" && strings.HasPrefix(x.Host, "127.0.0.1")) {
 			return nil, errors.New("relay transport must use wss off loopback")
 		}
-		d := &net.Dialer{Timeout: 10 * time.Second}
-		if x.Scheme == "wss" {
-			return tls.DialWithDialer(d, "tcp", x.Host, &tls.Config{MinVersion: tls.VersionTLS13, ServerName: x.Hostname()})
+		ws, _, err := websocket.Dial(ctx, u, nil)
+		if err != nil {
+			return nil, err
 		}
-		return d.DialContext(ctx, "tcp", x.Host)
+		return websocket.NetConn(ctx, ws, websocket.MessageBinary), nil
 	}}
 }
 func (m *Manager) Connect(ctx context.Context) (*yamux.Session, error) {
@@ -248,13 +246,26 @@ func (t *GatewayTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	}
 	request := req.Clone(req.Context())
 	request.RequestURI = request.URL.RequestURI()
+	if request.Body != nil {
+		defer request.Body.Close()
+	}
 	if err = request.Write(stream); err != nil {
 		_ = stream.Close()
+		t.mu.Lock()
+		if t.session == s {
+			t.session = nil
+		}
+		t.mu.Unlock()
 		return nil, err
 	}
 	response, err := http.ReadResponse(bufio.NewReader(stream), request)
 	if err != nil {
 		_ = stream.Close()
+		t.mu.Lock()
+		if t.session == s {
+			t.session = nil
+		}
+		t.mu.Unlock()
 		return nil, err
 	}
 	return response, nil

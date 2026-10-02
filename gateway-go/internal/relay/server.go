@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/coder/websocket"
 	"github.com/hashicorp/yamux"
 )
 
@@ -84,20 +85,17 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	if err := s.Cfg.Validate(); err != nil {
 		return err
 	}
-	var ln net.Listener
-	var err error
-	if s.Cfg.TLSCert != "" {
-		cert, e := tls.LoadX509KeyPair(s.Cfg.TLSCert, s.Cfg.TLSKey)
-		if e != nil {
-			return e
-		}
-		ln, err = tls.Listen("tcp", s.Cfg.Listen, &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{cert}})
-	} else {
-		ln, err = net.Listen("tcp", s.Cfg.Listen)
-	}
+	wsListener, err := net.Listen("tcp", s.Cfg.Listen)
 	if err != nil {
 		return err
 	}
+	wsServer := &http.Server{Handler: s.WebSocketHandler(ctx), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 60 * time.Second, IdleTimeout: 60 * time.Second}
+	go func() {
+		<-ctx.Done()
+		shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = wsServer.Shutdown(shutdown)
+	}()
 	if s.Cfg.HTTPListen != "" {
 		httpListener, e := net.Listen("tcp", s.Cfg.HTTPListen)
 		if e != nil {
@@ -119,14 +117,33 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 			}
 		}()
 	}
-	return s.ServeListener(ctx, ln)
+	if s.Cfg.TLSCert != "" {
+		return wsServer.ServeTLS(wsListener, s.Cfg.TLSCert, s.Cfg.TLSKey)
+	}
+	return wsServer.Serve(wsListener)
+}
+
+// WebSocketHandler upgrades a gateway or client connection to a yamux session.
+// It is exposed for embedding and for protocol-level tests; production uses
+// it through ListenAndServe.
+func (s *Server) WebSocketHandler(ctx context.Context) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.CloseNow()
+		s.handleConn(ctx, websocket.NetConn(ctx, conn, websocket.MessageBinary))
+	})
 }
 
 // ServeHTTPListener exposes a conventional HTTPS API for phone clients. The
 // relay transport remains separate so gateways keep one outbound persistent
 // connection while mobile apps use ordinary HTTP libraries.
 func (s *Server) ServeHTTPListener(ctx context.Context, ln net.Listener) error {
-	server := &http.Server{Handler: s.HTTPHandler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 60 * time.Second, IdleTimeout: 60 * time.Second}
+	// WriteTimeout stays disabled because gateway event streams are long-lived;
+	// the gateway handler and client context still bound each stream.
+	server := &http.Server{Handler: s.HTTPHandler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second}
 	go func() {
 		<-ctx.Done()
 		shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
