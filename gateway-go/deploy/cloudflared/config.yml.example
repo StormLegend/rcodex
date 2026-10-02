@@ -1,0 +1,16 @@
+# Locally-managed Cloudflare Tunnel configuration.
+# Keep this file and the credentials file readable only by the cloudflared
+# service account. The rcodex API token is still required at the origin.
+tunnel: REPLACE_WITH_TUNNEL_UUID
+credentials-file: /Users/USERNAME/.cloudflared/REPLACE_WITH_TUNNEL_UUID.json
+no-autoupdate: true
+protocol: quic
+metrics: 127.0.0.1:20090
+
+ingress:
+  - hostname: rcodex.example.com
+    service: http://127.0.0.1:18890
+    originRequest:
+      connectTimeout: 10s
+      httpHostHeader: localhost
+  - service: http_status:404

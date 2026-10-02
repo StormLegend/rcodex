@@ -90,6 +90,20 @@ The relay protocol is outbound from the gateway, so the Mac mini does not
 need an inbound port or router port-forward. Keep the relay listener behind a
 normal TLS certificate and rotate connector/access tokens independently.
 
+### Cloudflare Tunnel deployment
+
+Cloudflare Tunnel is an independent HTTPS ingress option. It is useful when a
+browser, webhook provider or native app should use a normal hostname. It can
+run alongside Relay; both target the loopback gateway and keep their own
+authentication layer. Use the templates under `deploy/cloudflared/` rather
+than embedding a Cloudflare token in the gateway config.
+
+The recommended origin is `http://127.0.0.1:18890` on the Mac mini. Keep the
+rcodex Bearer token enabled even when Cloudflare Access is configured. Access
+controls who reaches the hostname; the gateway token authorizes API operations.
+Cloudflare's connector is a separate launchd/systemd service and maintains its
+own outbound connections to the edge.
+
 The channel handlers enqueue work into durable sessions and the engine writes
 provider responses to the outbox. Before production cutover, run external
 acceptance tests with real bot credentials and finish relay peer
