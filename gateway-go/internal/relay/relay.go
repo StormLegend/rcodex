@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -148,5 +149,121 @@ func ServeHTTP(ctx context.Context, session *yamux.Session, handler http.Handler
 	if errors.Is(err, http.ErrServerClosed) {
 		return nil
 	}
+	return err
+}
+
+// GatewayTransport routes normal HTTP requests through a relay-connected
+// gateway. It is intended for mobile/desktop clients: each request becomes a
+// short-lived yamux stream, while the relay and gateway connections remain
+// persistent and reconnectable.
+type GatewayTransport struct {
+	URL       string
+	GatewayID string
+	Token     string
+	Dial      func(context.Context, string) (net.Conn, error)
+
+	mu      sync.Mutex
+	session *yamux.Session
+}
+
+func NewGatewayTransport(url, gatewayID, token string) *GatewayTransport {
+	m := New(config.Relay{URL: url})
+	return &GatewayTransport{URL: url, GatewayID: gatewayID, Token: token, Dial: m.Dial}
+}
+
+func (t *GatewayTransport) connect(ctx context.Context) (*yamux.Session, error) {
+	if t.URL == "" || t.GatewayID == "" || t.Token == "" {
+		return nil, errors.New("relay URL, gateway ID and token are required")
+	}
+	c, err := t.Dial(ctx, t.URL)
+	if err != nil {
+		return nil, err
+	}
+	s, err := yamux.Client(c, nil)
+	if err != nil {
+		_ = c.Close()
+		return nil, err
+	}
+	stream, err := s.Open()
+	if err != nil {
+		_ = s.Close()
+		return nil, err
+	}
+	_ = stream.SetDeadline(time.Now().Add(10 * time.Second))
+	if err = json.NewEncoder(stream).Encode(Hello{Type: "rcodex-relay/client", ID: t.GatewayID, Token: t.Token}); err != nil {
+		_ = stream.Close()
+		_ = s.Close()
+		return nil, err
+	}
+	var result HelloResult
+	err = json.NewDecoder(bufio.NewReader(stream)).Decode(&result)
+	_ = stream.Close()
+	if err != nil || !result.OK {
+		_ = s.Close()
+		if err == nil {
+			if result.Error == "" {
+				result.Error = "relay client authentication rejected"
+			}
+			err = errors.New(result.Error)
+		}
+		return nil, err
+	}
+	return s, nil
+}
+
+func (t *GatewayTransport) getSession(ctx context.Context) (*yamux.Session, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.session != nil && !t.session.IsClosed() {
+		return t.session, nil
+	}
+	s, err := t.connect(ctx)
+	if err != nil {
+		return nil, err
+	}
+	t.session = s
+	return s, nil
+}
+
+func (t *GatewayTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req == nil {
+		return nil, errors.New("nil HTTP request")
+	}
+	s, err := t.getSession(req.Context())
+	if err != nil {
+		return nil, err
+	}
+	stream, err := s.Open()
+	if err != nil {
+		t.mu.Lock()
+		if t.session == s {
+			_ = s.Close()
+			t.session = nil
+		}
+		t.mu.Unlock()
+		return nil, err
+	}
+	request := req.Clone(req.Context())
+	request.RequestURI = request.URL.RequestURI()
+	if err = request.Write(stream); err != nil {
+		_ = stream.Close()
+		return nil, err
+	}
+	response, err := http.ReadResponse(bufio.NewReader(stream), request)
+	if err != nil {
+		_ = stream.Close()
+		return nil, err
+	}
+	return response, nil
+}
+
+func (t *GatewayTransport) Close() error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.session == nil {
+		return nil
+	}
+	err := t.session.Close()
+	t.session = nil
 	return err
 }

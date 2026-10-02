@@ -31,7 +31,8 @@ jobs:
             [ "$os" = windows ] && ext=".exe"
             GOOS="$os" GOARCH="$arch" CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X github.com/StormLegend/rcodex/gateway-go/internal/web.Version=$VERSION" -o "dist/$name/rcg$ext" ./cmd/rcg
             GOOS="$os" GOARCH="$arch" CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o "dist/$name/rcgctl$ext" ./cmd/rcgctl
-            cp README.md gateway.example.json "dist/$name/"
+            GOOS="$os" GOARCH="$arch" CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o "dist/$name/rcodex-relay$ext" ./cmd/rcg-relay
+            cp README.md gateway.example.json relay.example.json "dist/$name/"
             if [ "$os" = windows ]; then (cd dist && zip -qr "$name.zip" "$name"); else tar -C dist -czf "dist/$name.tar.gz" "$name"; fi
             rm -rf "dist/$name"
           done

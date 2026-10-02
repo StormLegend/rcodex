@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"os"
 	"strings"
+
+	"github.com/StormLegend/rcodex/gateway-go/internal/relay"
 )
 
 func main() {
@@ -20,6 +22,9 @@ func main() {
 	workspace := flag.String("workspace", "", "workspace for create")
 	runtime := flag.String("runtime", "codex", "runtime for create")
 	mode := flag.String("mode", "ask", "permission mode for create")
+	relayURL := flag.String("relay-url", "", "relay URL (wss://host:port) instead of direct gateway URL")
+	gatewayID := flag.String("gateway", "", "relay gateway ID")
+	relayToken := flag.String("relay-token", os.Getenv("RCG_RELAY_TOKEN"), "relay client access token")
 	flag.Parse()
 	var method, path string
 	var body any
@@ -50,7 +55,17 @@ func main() {
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	resp, err := http.DefaultClient.Do(req)
+	client := http.DefaultClient
+	var transport *relay.GatewayTransport
+	if *relayURL != "" {
+		if *gatewayID == "" || *relayToken == "" {
+			fail("-relay-url requires -gateway and -relay-token")
+		}
+		transport = relay.NewGatewayTransport(*relayURL, *gatewayID, *relayToken)
+		defer transport.Close()
+		client = &http.Client{Transport: transport}
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		fail(err.Error())
 	}

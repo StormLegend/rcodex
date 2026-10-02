@@ -3,13 +3,70 @@ package relay
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net"
+	"net/http"
 	"testing"
 	"time"
 
 	"github.com/StormLegend/rcodex/gateway-go/internal/config"
 	"github.com/hashicorp/yamux"
 )
+
+func TestRelayForwardsMobileHTTPToGateway(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	server := NewServer(ServerConfig{Listen: ln.Addr().String(), Peers: map[string]Peer{
+		"gw-1": {ConnectorToken: "connector-token-012345678901234567890123", AccessToken: "access-token-012345678901234567890123"},
+	}})
+	go func() { _ = server.ServeListener(ctx, ln) }()
+	dial := func(ctx context.Context, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, "tcp", ln.Addr().String())
+	}
+	agent := New(config.Relay{URL: "ws://127.0.0.1:1", ID: "gw-1", Token: "connector-token-012345678901234567890123"})
+	agent.Dial = dial
+	agentSession, err := agent.ConnectAuthenticated(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer agentSession.Close()
+	go func() {
+		_ = ServeHTTP(ctx, agentSession, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/plain")
+			_, _ = w.Write([]byte("relay-ok"))
+		}))
+	}()
+	clientTransport := NewGatewayTransport("ws://127.0.0.1:1", "gw-1", "access-token-012345678901234567890123")
+	clientTransport.Dial = dial
+	defer clientTransport.Close()
+	client := &http.Client{Transport: clientTransport}
+	var response *http.Response
+	for attempt := 0; attempt < 20; attempt++ {
+		response, err = client.Get("http://gateway.local/healthz")
+		if err == nil && response.StatusCode == http.StatusOK {
+			break
+		}
+		if response != nil {
+			_ = response.Body.Close()
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "relay-ok" {
+		t.Fatalf("unexpected body %q", body)
+	}
+}
 
 func TestAuthenticatedRelayHandshake(t *testing.T) {
 	clientConn, serverConn := net.Pipe()

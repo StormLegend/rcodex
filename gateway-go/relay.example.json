@@ -1,0 +1,12 @@
+{
+  "listen": "0.0.0.0:9443",
+  "tls_cert": "/etc/rcodex-relay/fullchain.pem",
+  "tls_key": "/etc/rcodex-relay/privkey.pem",
+  "peers": {
+    "macmini": {
+      "connector_token": "replace-with-a-32-byte-gateway-secret",
+      "access_token": "replace-with-a-different-32-byte-client-secret",
+      "public_hooks": false
+    }
+  }
+}
