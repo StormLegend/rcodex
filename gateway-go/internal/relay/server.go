@@ -20,11 +20,14 @@ import (
 	"github.com/hashicorp/yamux"
 )
 
-// Peer is the two-sided credential set for one gateway. ConnectorToken is
-// used by the gateway agent; AccessToken is used by mobile/desktop clients.
+// Peer is the credential set for one gateway. ConnectorToken is used by the
+// gateway agent; AccessToken is used by mobile/desktop clients; GatewayToken
+// is injected when the relay forwards an authenticated HTTP request to the
+// gateway API.
 type Peer struct {
 	ConnectorToken string `json:"connector_token"`
 	AccessToken    string `json:"access_token"`
+	GatewayToken   string `json:"gateway_token"`
 	PublicHooks    bool   `json:"public_hooks"`
 }
 
@@ -62,7 +65,7 @@ func (c ServerConfig) Validate() error {
 		return errors.New("relay requires at least one peer")
 	}
 	for id, p := range c.Peers {
-		if id == "" || len(p.ConnectorToken) < 32 || len(p.AccessToken) < 32 || subtle.ConstantTimeCompare([]byte(p.ConnectorToken), []byte(p.AccessToken)) == 1 {
+		if id == "" || len(p.ConnectorToken) < 32 || len(p.AccessToken) < 32 || len(p.GatewayToken) < 32 || subtle.ConstantTimeCompare([]byte(p.ConnectorToken), []byte(p.AccessToken)) == 1 || subtle.ConstantTimeCompare([]byte(p.ConnectorToken), []byte(p.GatewayToken)) == 1 || subtle.ConstantTimeCompare([]byte(p.AccessToken), []byte(p.GatewayToken)) == 1 {
 			return fmt.Errorf("invalid credentials for peer %q", id)
 		}
 	}
@@ -204,6 +207,7 @@ func (s *Server) HTTPHandler() http.Handler {
 		request.URL.Path = path
 		request.URL.RawPath = ""
 		request.RequestURI = path
+		request.Header.Set("Authorization", "Bearer "+peer.GatewayToken)
 		if err = request.Write(stream); err != nil {
 			http.Error(w, "gateway request failed", http.StatusBadGateway)
 			return
@@ -330,19 +334,32 @@ func (s *Server) forward(ctx context.Context, id string, client net.Conn) {
 		writeUnavailable(client)
 		return
 	}
+	peer, ok := s.Cfg.Peers[id]
+	if !ok {
+		writeUnavailable(client)
+		return
+	}
 	server, err := agent.Open()
 	if err != nil {
 		writeUnavailable(client)
 		return
 	}
 	defer server.Close()
-	done := make(chan struct{}, 2)
-	go func() { _, _ = io.Copy(server, client); done <- struct{}{} }()
-	go func() { _, _ = io.Copy(client, server); done <- struct{}{} }()
-	select {
-	case <-ctx.Done():
-	case <-done:
+	request, err := http.ReadRequest(bufio.NewReader(client))
+	if err != nil {
+		writeUnavailable(client)
+		return
 	}
+	request.Header.Set("Authorization", "Bearer "+peer.GatewayToken)
+	if err = request.Write(server); err != nil {
+		return
+	}
+	response, err := http.ReadResponse(bufio.NewReader(server), request)
+	if err != nil {
+		return
+	}
+	defer response.Body.Close()
+	_ = response.Write(client)
 }
 
 func (s *Server) registerAgent(id string, session *yamux.Session) {

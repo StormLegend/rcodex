@@ -7,6 +7,7 @@
     "macmini": {
       "connector_token": "replace-with-a-32-byte-gateway-secret",
       "access_token": "replace-with-a-different-32-byte-client-secret",
+      "gateway_token": "replace-with-the-gateway-api-token",
       "public_hooks": false
     }
   }

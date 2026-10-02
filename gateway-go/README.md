@@ -49,7 +49,8 @@ Linux deployments can use `deploy/rcodex-go.service`.
 
 Run `cmd/rcg-relay` on a public host with a TLS certificate. Start from
 `relay.example.json`, generate independent connector and client secrets, and
-install `deploy/rcodex-relay.service`. Configure the gateway with the same
+set `gateway_token` to the gateway's API token. Install
+`deploy/rcodex-relay.service`. Configure the gateway with the same
 gateway ID and connector token:
 
 ```json
@@ -81,6 +82,9 @@ curl -H "Authorization: Bearer $RCG_RELAY_TOKEN" \
 
 The HTTP listener is the intended integration point for iOS, Android and web
 clients. It keeps the custom yamux protocol inside the relay-to-gateway link.
+The relay validates the client access token and replaces it with
+`gateway_token` before forwarding to the gateway, so the gateway API token is
+never given to the phone app.
 
 The relay protocol is outbound from the gateway, so the Mac mini does not
 need an inbound port or router port-forward. Keep the relay listener behind a

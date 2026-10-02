@@ -19,7 +19,7 @@ func TestWebSocketRelayTransport(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	server := NewServer(ServerConfig{Listen: "127.0.0.1:0", Peers: map[string]Peer{
-		"gw-ws": {ConnectorToken: "connector-token-ws-012345678901234567", AccessToken: "access-token-ws-012345678901234567"},
+		"gw-ws": {ConnectorToken: "connector-token-ws-012345678901234567", AccessToken: "access-token-ws-012345678901234567", GatewayToken: "gateway-token-ws-012345678901234567"},
 	}})
 	httpServer := httptest.NewServer(server.WebSocketHandler(ctx))
 	defer httpServer.Close()
@@ -32,6 +32,10 @@ func TestWebSocketRelayTransport(t *testing.T) {
 	defer agentSession.Close()
 	go func() {
 		_ = ServeHTTP(ctx, agentSession, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Header.Get("Authorization") != "Bearer gateway-token-ws-012345678901234567" {
+				http.Error(w, "missing translated gateway token", http.StatusUnauthorized)
+				return
+			}
 			_, _ = w.Write([]byte("websocket-ok"))
 		}))
 	}()
@@ -56,7 +60,7 @@ func TestRelayForwardsMobileHTTPToGateway(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	server := NewServer(ServerConfig{Listen: ln.Addr().String(), Peers: map[string]Peer{
-		"gw-1": {ConnectorToken: "connector-token-012345678901234567890123", AccessToken: "access-token-012345678901234567890123"},
+		"gw-1": {ConnectorToken: "connector-token-012345678901234567890123", AccessToken: "access-token-012345678901234567890123", GatewayToken: "gateway-token-012345678901234567890123"},
 	}})
 	go func() { _ = server.ServeListener(ctx, ln) }()
 	dial := func(ctx context.Context, _ string) (net.Conn, error) {
@@ -71,6 +75,10 @@ func TestRelayForwardsMobileHTTPToGateway(t *testing.T) {
 	defer agentSession.Close()
 	go func() {
 		_ = ServeHTTP(ctx, agentSession, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Header.Get("Authorization") != "Bearer gateway-token-012345678901234567890123" {
+				http.Error(w, "missing translated gateway token", http.StatusUnauthorized)
+				return
+			}
 			w.Header().Set("Content-Type", "text/plain")
 			_, _ = w.Write([]byte("relay-ok"))
 		}))
