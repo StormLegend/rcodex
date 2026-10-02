@@ -40,6 +40,37 @@ func TestRelayForwardsMobileHTTPToGateway(t *testing.T) {
 			_, _ = w.Write([]byte("relay-ok"))
 		}))
 	}()
+	httpLn, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() { _ = server.ServeHTTPListener(ctx, httpLn) }()
+	unauthReq, err := http.NewRequest(http.MethodGet, "http://"+httpLn.Addr().String()+"/v1/gateways/gw-1/healthz", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unauthResp, err := http.DefaultClient.Do(unauthReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = unauthResp.Body.Close()
+	if unauthResp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated status = %d", unauthResp.StatusCode)
+	}
+	httpReq, err := http.NewRequest(http.MethodGet, "http://"+httpLn.Addr().String()+"/v1/gateways/gw-1/healthz", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpReq.Header.Set("Authorization", "Bearer access-token-012345678901234567890123")
+	httpResp, err := http.DefaultClient.Do(httpReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpBody, err := io.ReadAll(httpResp.Body)
+	_ = httpResp.Body.Close()
+	if err != nil || httpResp.StatusCode != http.StatusOK || string(httpBody) != "relay-ok" {
+		t.Fatalf("HTTP ingress status=%d body=%q err=%v", httpResp.StatusCode, httpBody, err)
+	}
 	clientTransport := NewGatewayTransport("ws://127.0.0.1:1", "gw-1", "access-token-012345678901234567890123")
 	clientTransport.Dial = dial
 	defer clientTransport.Close()

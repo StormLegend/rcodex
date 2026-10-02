@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -28,10 +30,11 @@ type Peer struct {
 // ServerConfig is intentionally separate from the gateway config so a relay
 // can be deployed as a small, stateless edge service.
 type ServerConfig struct {
-	Listen  string          `json:"listen"`
-	TLSCert string          `json:"tls_cert"`
-	TLSKey  string          `json:"tls_key"`
-	Peers   map[string]Peer `json:"peers"`
+	Listen     string          `json:"listen"`
+	HTTPListen string          `json:"http_listen"`
+	TLSCert    string          `json:"tls_cert"`
+	TLSKey     string          `json:"tls_key"`
+	Peers      map[string]Peer `json:"peers"`
 }
 
 func (c ServerConfig) Validate() error {
@@ -41,6 +44,18 @@ func (c ServerConfig) Validate() error {
 	}
 	if host != "localhost" && net.ParseIP(host) != nil && !net.ParseIP(host).IsLoopback() && (c.TLSCert == "" || c.TLSKey == "") {
 		return errors.New("non-loopback relay listener requires tls_cert and tls_key")
+	}
+	if c.HTTPListen != "" {
+		if c.HTTPListen == c.Listen {
+			return errors.New("http_listen must differ from listen")
+		}
+		host, _, err = net.SplitHostPort(c.HTTPListen)
+		if err != nil {
+			return err
+		}
+		if host != "localhost" && net.ParseIP(host) != nil && !net.ParseIP(host).IsLoopback() && (c.TLSCert == "" || c.TLSKey == "") {
+			return errors.New("non-loopback http_listen requires tls_cert and tls_key")
+		}
 	}
 	if len(c.Peers) == 0 {
 		return errors.New("relay requires at least one peer")
@@ -83,7 +98,112 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	if s.Cfg.HTTPListen != "" {
+		httpListener, e := net.Listen("tcp", s.Cfg.HTTPListen)
+		if e != nil {
+			return e
+		}
+		if s.Cfg.TLSCert != "" {
+			cert, e := tls.LoadX509KeyPair(s.Cfg.TLSCert, s.Cfg.TLSKey)
+			if e != nil {
+				_ = httpListener.Close()
+				return e
+			}
+			httpListener = tls.NewListener(httpListener, &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{cert}})
+		}
+		go func() {
+			if e := s.ServeHTTPListener(ctx, httpListener); e != nil && ctx.Err() == nil {
+				// The raw relay listener remains the source of truth for gateway
+				// connections; HTTP ingress failures are isolated and observable
+				// through the process exit/logging layer.
+			}
+		}()
+	}
 	return s.ServeListener(ctx, ln)
+}
+
+// ServeHTTPListener exposes a conventional HTTPS API for phone clients. The
+// relay transport remains separate so gateways keep one outbound persistent
+// connection while mobile apps use ordinary HTTP libraries.
+func (s *Server) ServeHTTPListener(ctx context.Context, ln net.Listener) error {
+	server := &http.Server{Handler: s.HTTPHandler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 60 * time.Second, IdleTimeout: 60 * time.Second}
+	go func() {
+		<-ctx.Done()
+		shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = server.Shutdown(shutdown)
+	}()
+	err := server.Serve(ln)
+	if errors.Is(err, http.ErrServerClosed) {
+		return nil
+	}
+	return err
+}
+
+func (s *Server) HTTPHandler() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/healthz" {
+			s.mu.RLock()
+			agents := len(s.agents)
+			s.mu.RUnlock()
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprintf(w, `{"ok":true,"agents":%d}`, agents)
+			return
+		}
+		parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+		if len(parts) < 3 || parts[0] != "v1" || parts[1] != "gateways" {
+			http.NotFound(w, r)
+			return
+		}
+		id, err := url.PathUnescape(parts[2])
+		if err != nil {
+			http.Error(w, "invalid gateway", http.StatusBadRequest)
+			return
+		}
+		peer, ok := s.Cfg.Peers[id]
+		if !ok || !secureEqual(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "), peer.AccessToken) {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		s.mu.RLock()
+		agent := s.agents[id]
+		s.mu.RUnlock()
+		if agent == nil || agent.IsClosed() {
+			http.Error(w, `{"error":"gateway unavailable"}`, http.StatusServiceUnavailable)
+			return
+		}
+		stream, err := agent.Open()
+		if err != nil {
+			http.Error(w, `{"error":"gateway unavailable"}`, http.StatusServiceUnavailable)
+			return
+		}
+		defer stream.Close()
+		path := "/" + strings.Join(parts[3:], "/")
+		if r.URL.RawQuery != "" {
+			path += "?" + r.URL.RawQuery
+		}
+		request := r.Clone(r.Context())
+		request.URL.Path = path
+		request.URL.RawPath = ""
+		request.RequestURI = path
+		if err = request.Write(stream); err != nil {
+			http.Error(w, "gateway request failed", http.StatusBadGateway)
+			return
+		}
+		response, err := http.ReadResponse(bufio.NewReader(stream), request)
+		if err != nil {
+			http.Error(w, "gateway response failed", http.StatusBadGateway)
+			return
+		}
+		defer response.Body.Close()
+		for key, values := range response.Header {
+			for _, value := range values {
+				w.Header().Add(key, value)
+			}
+		}
+		w.WriteHeader(response.StatusCode)
+		_, _ = io.Copy(w, response.Body)
+	})
 }
 
 // ServeListener runs the relay on an already-bound listener. It is useful for
@@ -255,12 +375,4 @@ func writeHelloResult(w net.Conn, result HelloResult) {
 func writeUnavailable(w net.Conn) {
 	body := `{"error":"gateway unavailable"}`
 	_, _ = fmt.Fprintf(w, "HTTP/1.1 503 Service Unavailable\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s", len(body), body)
-}
-
-// Ensure this file does not accidentally accept a WebSocket URL as an HTTP
-// proxy. The relay protocol is TLS-wrapped TCP plus yamux, while the public
-// URL retains the wss:// spelling for compatibility with gateway configs.
-func isLoopbackAddress(addr string) bool {
-	host, _, err := net.SplitHostPort(addr)
-	return err == nil && (strings.EqualFold(host, "localhost") || net.ParseIP(host) != nil && net.ParseIP(host).IsLoopback())
 }

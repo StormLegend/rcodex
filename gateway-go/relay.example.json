@@ -1,5 +1,6 @@
 {
   "listen": "0.0.0.0:9443",
+  "http_listen": "0.0.0.0:9444",
   "tls_cert": "/etc/rcodex-relay/fullchain.pem",
   "tls_key": "/etc/rcodex-relay/privkey.pem",
   "peers": {

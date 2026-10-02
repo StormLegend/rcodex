@@ -27,6 +27,9 @@ func New(c config.Relay) *Manager {
 		if e != nil {
 			return nil, e
 		}
+		// The gateway transport is TLS-wrapped TCP plus yamux. `wss` is kept
+		// as the public config scheme for backwards compatibility; mobile and
+		// browser clients should use ServerConfig.HTTPListen instead.
 		if x.Scheme != "wss" && !(x.Scheme == "ws" && strings.HasPrefix(x.Host, "127.0.0.1")) {
 			return nil, errors.New("relay transport must use wss off loopback")
 		}

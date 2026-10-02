@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 )
 
 func main() {
@@ -61,19 +62,40 @@ func main() {
 	if c.Relay.URL != "" {
 		rm := relay.New(c.Relay)
 		go func() {
-			session, err := rm.ConnectRetry(ctx)
-			if err != nil {
-				log.Error("relay stopped", "error", err)
-				return
-			}
-			log.Info("relay connected", "id", c.Relay.ID)
-			go func() {
-				if err := relay.ServeHTTP(ctx, session, server.Handler()); err != nil && ctx.Err() == nil {
-					log.Error("relay http stopped", "error", err)
+			backoff := 250 * time.Millisecond
+			for ctx.Err() == nil {
+				session, err := rm.ConnectRetry(ctx)
+				if err != nil {
+					if ctx.Err() == nil {
+						log.Warn("relay connect failed", "error", err)
+					}
+					return
 				}
-			}()
-			<-ctx.Done()
-			_ = session.Close()
+				log.Info("relay connected", "id", c.Relay.ID)
+				serveCtx, cancel := context.WithCancel(ctx)
+				done := make(chan error, 1)
+				go func() { done <- relay.ServeHTTP(serveCtx, session, server.Handler()) }()
+				select {
+				case <-ctx.Done():
+					cancel()
+					_ = session.Close()
+					return
+				case err := <-done:
+					cancel()
+					_ = session.Close()
+					if ctx.Err() == nil && err != nil {
+						log.Warn("relay connection lost", "error", err)
+					}
+				}
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(backoff):
+				}
+				if backoff < 10*time.Second {
+					backoff *= 2
+				}
+			}
 		}()
 	}
 	fmt.Println("rcodex-go listening", c.Listen)

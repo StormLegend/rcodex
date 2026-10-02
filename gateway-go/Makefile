@@ -7,3 +7,5 @@ vet:
 	go vet ./...
 build:
 	CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o bin/rcodex-go ./cmd/rcg
+	CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o bin/rcgctl ./cmd/rcgctl
+	CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o bin/rcodex-relay ./cmd/rcg-relay

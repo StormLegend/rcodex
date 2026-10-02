@@ -62,13 +62,25 @@ gateway ID and connector token:
 }
 ```
 
-The mobile/desktop client uses the access token, never the connector token:
+The mobile/desktop client can use `rcgctl` over the yamux relay path, or any
+normal HTTPS client through `http_listen`:
 
 ```bash
 rcgctl -relay-url wss://relay.example.com:9443 \
   -gateway macmini -relay-token "$RCG_RELAY_TOKEN" \
   -command health
 ```
+
+With the HTTP listener configured as `0.0.0.0:9444`, the equivalent standard
+HTTP request is:
+
+```bash
+curl -H "Authorization: Bearer $RCG_RELAY_TOKEN" \
+  https://relay.example.com:9444/v1/gateways/macmini/healthz
+```
+
+The HTTP listener is the intended integration point for iOS, Android and web
+clients. It keeps the custom yamux protocol inside the relay-to-gateway link.
 
 The relay protocol is outbound from the gateway, so the Mac mini does not
 need an inbound port or router port-forward. Keep the relay listener behind a
