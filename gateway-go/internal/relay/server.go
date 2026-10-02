@@ -88,17 +88,20 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	if err := s.Cfg.Validate(); err != nil {
 		return err
 	}
+	runCtx, stop := context.WithCancel(ctx)
+	defer stop()
 	wsListener, err := net.Listen("tcp", s.Cfg.Listen)
 	if err != nil {
 		return err
 	}
-	wsServer := &http.Server{Handler: s.WebSocketHandler(ctx), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 60 * time.Second, IdleTimeout: 60 * time.Second}
+	wsServer := &http.Server{Handler: s.WebSocketHandler(runCtx), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 60 * time.Second, IdleTimeout: 60 * time.Second}
 	go func() {
-		<-ctx.Done()
+		<-runCtx.Done()
 		shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_ = wsServer.Shutdown(shutdown)
 	}()
+	httpErr := make(chan error, 1)
 	if s.Cfg.HTTPListen != "" {
 		httpListener, e := net.Listen("tcp", s.Cfg.HTTPListen)
 		if e != nil {
@@ -113,17 +116,38 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 			httpListener = tls.NewListener(httpListener, &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{cert}})
 		}
 		go func() {
-			if e := s.ServeHTTPListener(ctx, httpListener); e != nil && ctx.Err() == nil {
-				// The raw relay listener remains the source of truth for gateway
-				// connections; HTTP ingress failures are isolated and observable
-				// through the process exit/logging layer.
-			}
+			httpErr <- s.ServeHTTPListener(runCtx, httpListener)
 		}()
 	}
-	if s.Cfg.TLSCert != "" {
-		return wsServer.ServeTLS(wsListener, s.Cfg.TLSCert, s.Cfg.TLSKey)
+	wsErr := make(chan error, 1)
+	go func() {
+		if s.Cfg.TLSCert != "" {
+			wsErr <- wsServer.ServeTLS(wsListener, s.Cfg.TLSCert, s.Cfg.TLSKey)
+			return
+		}
+		wsErr <- wsServer.Serve(wsListener)
+	}()
+	if s.Cfg.HTTPListen == "" {
+		err := <-wsErr
+		if errors.Is(err, http.ErrServerClosed) || ctx.Err() != nil {
+			return nil
+		}
+		return err
 	}
-	return wsServer.Serve(wsListener)
+	select {
+	case err := <-wsErr:
+		stop()
+		if errors.Is(err, http.ErrServerClosed) || ctx.Err() != nil {
+			return nil
+		}
+		return err
+	case err := <-httpErr:
+		stop()
+		if errors.Is(err, http.ErrServerClosed) || ctx.Err() != nil {
+			return nil
+		}
+		return err
+	}
 }
 
 // WebSocketHandler upgrades a gateway or client connection to a yamux session.
@@ -199,6 +223,15 @@ func (s *Server) HTTPHandler() http.Handler {
 			return
 		}
 		defer stream.Close()
+		streamDone := make(chan struct{})
+		defer close(streamDone)
+		go func() {
+			select {
+			case <-r.Context().Done():
+				_ = stream.Close()
+			case <-streamDone:
+			}
+		}()
 		path := "/" + strings.Join(parts[3:], "/")
 		if r.URL.RawQuery != "" {
 			path += "?" + r.URL.RawQuery
