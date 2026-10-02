@@ -257,8 +257,25 @@ func (s *Server) HTTPHandler() http.Handler {
 			}
 		}
 		w.WriteHeader(response.StatusCode)
-		_, _ = io.Copy(w, response.Body)
+		copyResponse(w, response.Body)
 	})
+}
+
+func copyResponse(w http.ResponseWriter, body io.Reader) {
+	flusher, flush := w.(http.Flusher)
+	buf := make([]byte, 32*1024)
+	for {
+		n, err := body.Read(buf)
+		if n > 0 {
+			_, _ = w.Write(buf[:n])
+			if flush {
+				flusher.Flush()
+			}
+		}
+		if err != nil {
+			return
+		}
+	}
 }
 
 // ServeListener runs the relay on an already-bound listener. It is useful for
