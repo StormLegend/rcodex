@@ -92,6 +92,19 @@ func TestRelayForwardsMobileHTTPToGateway(t *testing.T) {
 	if unauthResp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("unauthenticated status = %d", unauthResp.StatusCode)
 	}
+	rawTokenReq, err := http.NewRequest(http.MethodGet, "http://"+httpLn.Addr().String()+"/v1/gateways/gw-1/healthz", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rawTokenReq.Header.Set("Authorization", "access-token-012345678901234567890123")
+	rawTokenResp, err := http.DefaultClient.Do(rawTokenReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = rawTokenResp.Body.Close()
+	if rawTokenResp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("raw token status = %d", rawTokenResp.StatusCode)
+	}
 	httpReq, err := http.NewRequest(http.MethodGet, "http://"+httpLn.Addr().String()+"/v1/gateways/gw-1/healthz", nil)
 	if err != nil {
 		t.Fatal(err)

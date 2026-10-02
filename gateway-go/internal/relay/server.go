@@ -178,7 +178,8 @@ func (s *Server) HTTPHandler() http.Handler {
 			return
 		}
 		peer, ok := s.Cfg.Peers[id]
-		if !ok || !secureEqual(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "), peer.AccessToken) {
+		authorization := r.Header.Get("Authorization")
+		if !ok || !strings.HasPrefix(authorization, "Bearer ") || !secureEqual(strings.TrimPrefix(authorization, "Bearer "), peer.AccessToken) {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
