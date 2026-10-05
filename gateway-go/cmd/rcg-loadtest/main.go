@@ -44,8 +44,9 @@ func main() {
 	duration := flag.Duration("duration", time.Minute, "test duration")
 	concurrency := flag.Int("concurrency", 4, "workers")
 	pause := flag.Duration("pause", 100*time.Millisecond, "pause between requests per worker")
+	report := flag.Duration("report-interval", time.Minute, "periodic progress report interval")
 	flag.Parse()
-	if *duration <= 0 || *concurrency < 1 || *concurrency > 1000 || *pause < 0 {
+	if *duration <= 0 || *concurrency < 1 || *concurrency > 1000 || *pause < 0 || *report <= 0 {
 		fail("invalid duration or concurrency")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), *duration)
@@ -53,6 +54,21 @@ func main() {
 	client := &http.Client{Timeout: 15 * time.Second}
 	var c counters
 	var wg sync.WaitGroup
+	done := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(*report)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-done:
+				return
+			case <-ticker.C:
+				fmt.Printf("progress requests=%d failed=%d\n", atomic.LoadInt64(&c.total), atomic.LoadInt64(&c.failed))
+			}
+		}
+	}()
 	for i := 0; i < *concurrency; i++ {
 		wg.Add(1)
 		go func() {
@@ -84,6 +100,7 @@ func main() {
 		}()
 	}
 	wg.Wait()
+	close(done)
 	c.mu.Lock()
 	b := c.buckets
 	c.mu.Unlock()
