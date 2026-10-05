@@ -2,15 +2,20 @@
 # Health-gated, atomic upgrade for the independent Go gateway LaunchAgent.
 # The old Node gateway is outside this layout and is never stopped here.
 set -eu
-if [ "$#" -lt 2 ]; then echo "usage: $0 BINARY VERSION [CONFIG]" >&2; exit 2; fi
+if [ "$#" -lt 2 ]; then echo "usage: $0 BINARY VERSION [CONFIG] [EXPECTED_SHA256]" >&2; exit 2; fi
 BIN=$1
 VERSION=$2
 APP_ROOT=${RCG_APP_ROOT:-"$HOME/Applications/rcodex-go"}
 CONFIG=${3:-"$HOME/Library/Application Support/rcodex-go/gateway.json"}
+EXPECTED_SHA256=${4:-${RCG_EXPECTED_SHA256:-}}
 LABEL=${RCG_LAUNCHD_LABEL:-com.stormlegend.rcodex-go}
 HEALTH_URL=${RCG_HEALTH_URL:-http://127.0.0.1:18890/healthz}
 case "$VERSION" in *[!A-Za-z0-9._-]*|'') echo "invalid version" >&2; exit 2;; esac
 [ -f "$BIN" ] || { echo "binary not found: $BIN" >&2; exit 2; }
+if [ -n "$EXPECTED_SHA256" ]; then
+  ACTUAL_SHA256=$(shasum -a 256 "$BIN" | awk '{print $1}')
+  [ "$ACTUAL_SHA256" = "$EXPECTED_SHA256" ] || { echo "sha256 mismatch" >&2; exit 2; }
+fi
 mkdir -p "$APP_ROOT/releases"
 RELEASE="$APP_ROOT/releases/$VERSION"
 if [ -e "$RELEASE/rcg" ]; then echo "release already exists: $VERSION" >&2; exit 2; fi

@@ -7,6 +7,11 @@ binary into a version directory, atomically switches the `rcg` symlink, restarts
 only the Go unit, checks `/healthz` for the requested version, and restores the
 previous symlink on failure.
 
+Pass the expected SHA256 as the fourth argument (or set
+`RCG_EXPECTED_SHA256`) so the script rejects a tampered binary before creating
+the release directory. The published GitHub `SHA256SUMS` file is the source for
+that value.
+
 Run `rcg-admin backup` before upgrades and keep the generated SQLite backup
 outside the active data directory. Run `rcg-admin restore` only while the Go
 unit is stopped; it validates the backup and preserves a pre-restore backup.

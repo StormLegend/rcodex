@@ -1,15 +1,20 @@
 #!/bin/sh
 # Health-gated atomic upgrade for a Go gateway systemd service.
 set -eu
-if [ "$#" -lt 2 ]; then echo "usage: $0 BINARY VERSION [APP_ROOT]" >&2; exit 2; fi
+if [ "$#" -lt 2 ]; then echo "usage: $0 BINARY VERSION [APP_ROOT] [EXPECTED_SHA256]" >&2; exit 2; fi
 BIN=$1
 VERSION=$2
 APP_ROOT=${3:-"$HOME/Applications/rcodex-go"}
+EXPECTED_SHA256=${4:-${RCG_EXPECTED_SHA256:-}}
 SERVICE=${RCG_SYSTEMD_SERVICE:-rcodex-go.service}
 CONFIG=${RCG_CONFIG:-"$APP_ROOT/gateway.json"}
 HEALTH_URL=${RCG_HEALTH_URL:-http://127.0.0.1:18890/healthz}
 case "$VERSION" in *[!A-Za-z0-9._-]*|'') echo "invalid version" >&2; exit 2;; esac
 [ -f "$BIN" ] || { echo "binary not found: $BIN" >&2; exit 2; }
+if [ -n "$EXPECTED_SHA256" ]; then
+  ACTUAL_SHA256=$(sha256sum "$BIN" | awk '{print $1}')
+  [ "$ACTUAL_SHA256" = "$EXPECTED_SHA256" ] || { echo "sha256 mismatch" >&2; exit 2; }
+fi
 mkdir -p "$APP_ROOT/releases"
 RELEASE="$APP_ROOT/releases/$VERSION"
 [ ! -e "$RELEASE/rcg" ] || { echo "release already exists" >&2; exit 2; }
