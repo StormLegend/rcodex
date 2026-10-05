@@ -51,3 +51,6 @@ each gateway owns its sessions and data, and in-flight operations cannot move.
   were not present, so external acceptance remains open.
 - Short concurrent load test and backup/restore/rotation drills pass. A real
   24-hour and 72-hour elapsed soak still needs to run and be recorded.
+- A low-rate 24-hour read-only soak was started on Mac mini as PID 38182 using
+  an environment token (not a command-line argument); its final result is
+  intentionally pending until the process exits.
