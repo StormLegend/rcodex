@@ -123,6 +123,12 @@ the gateway data directory, durable `once` / `every:duration` schedules, model
 and provider inventory, and per-source rate limits. Schedules are persisted and
 enqueued by the engine; a busy session is not replayed.
 
+List endpoints return explicit cursors: `GET /api/sessions?limit=N` and
+`GET /api/sessions/{id}/history?limit=N` return `next_before`; pass that value
+back as `before` for the next older page. Session event history accepts
+`after`, `before` and `limit`, returning `next_after` or `next_before` as
+appropriate. A zero cursor means there is no additional page.
+
 Run `cmd/rcg-admin backup` and `restore` for SQLite maintenance. Restore must be
 performed with the Go service stopped; the command validates the input and
 preserves a pre-restore backup. `rotate-token` atomically rewrites a literal
