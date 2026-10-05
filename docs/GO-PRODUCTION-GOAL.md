@@ -83,6 +83,8 @@ each gateway owns its sessions and data, and in-flight operations cannot move.
 - The macOS/Linux upgrade scripts now reject a supplied SHA256 mismatch before
   creating a release directory; shell syntax and a negative checksum gate were
   verified locally.
+- An isolated upgrade drill verified both the SHA256-accepted atomic switch and
+  health-gated rollback to the previous release symlink.
 - A live `rcg-ops` run probed the legacy Node health endpoint on `127.0.0.1:8787`
   and the Mac mini Go endpoint through a temporary SSH loopback forward; both
   were healthy and explicit selection persisted `go` without replaying a turn.
