@@ -64,3 +64,6 @@ each gateway owns its sessions and data, and in-flight operations cannot move.
   a non-secret metadata record at `Applications/rcodex-go/soak-chain.json`.
 - Latest observed 24-hour phase report: `requests=60 failed=0`; the 72-hour
   phase will be created only after the first phase exits successfully.
+- A fresh local cross-build matrix produced all six binaries for each of
+  `linux/amd64`, `linux/arm64`, `darwin/amd64`, `darwin/arm64` and
+  `windows/amd64`; the same matrix is published by the tag release workflow.
