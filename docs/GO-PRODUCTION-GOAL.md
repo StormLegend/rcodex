@@ -83,6 +83,9 @@ each gateway owns its sessions and data, and in-flight operations cannot move.
 - The macOS/Linux upgrade scripts now reject a supplied SHA256 mismatch before
   creating a release directory; shell syntax and a negative checksum gate were
   verified locally.
+- A live `rcg-ops` run probed the legacy Node health endpoint on `127.0.0.1:8787`
+  and the Mac mini Go endpoint through a temporary SSH loopback forward; both
+  were healthy and explicit selection persisted `go` without replaying a turn.
 - The v0.2.8 soak was intentionally stopped before the pagination binary
   change. A new environment-token chained soak is now running as v0.2.9 PID
   40470 with separate logs under
