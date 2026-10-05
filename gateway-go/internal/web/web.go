@@ -158,7 +158,8 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 }
 func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
 	if r.Method == "GET" {
-		v, e := s.Store.Sessions(0, 100)
+		before, _ := strconv.ParseInt(r.URL.Query().Get("before"), 10, 64)
+		v, e := s.Store.Sessions(before, queryLimit(r.URL.Query().Get("limit"), 100, 500))
 		if e != nil {
 			s.writeErr(w, e)
 			return
@@ -238,7 +239,7 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request) {
 		s.write(w, 200, map[string]any{"events": ev})
 		return
 	}
-	if len(parts) > 1 && parts[1] == "turns" {
+	if len(parts) > 1 && (parts[1] == "turns" || parts[1] == "history") {
 		if r.Method != http.MethodGet {
 			http.NotFound(w, r)
 			return

@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/StormLegend/rcodex/gateway-go/internal/config"
@@ -78,6 +79,14 @@ func TestSessionLifecycleAttachmentsSchedulesAndModels(t *testing.T) {
 	w = req(t, h, http.MethodGet, "/api/sessions/"+created.Session.ID+"/turns", nil)
 	if w.Code != 200 {
 		t.Fatal(w.Code)
+	}
+	w = req(t, h, http.MethodGet, "/api/sessions/"+created.Session.ID+"/history?limit=10", nil)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"turns"`) {
+		t.Fatalf("history status=%d body=%s", w.Code, w.Body.String())
+	}
+	w = req(t, h, http.MethodGet, "/api/sessions?limit=1", nil)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"sessions"`) {
+		t.Fatalf("sessions status=%d body=%s", w.Code, w.Body.String())
 	}
 	w = req(t, h, http.MethodDelete, "/api/sessions/"+created.Session.ID, nil)
 	if w.Code != 200 {
