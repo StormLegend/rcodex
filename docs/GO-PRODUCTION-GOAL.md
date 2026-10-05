@@ -30,9 +30,9 @@ each gateway owns its sessions and data, and in-flight operations cannot move.
 ## Baseline evidence
 
 - Repository: `StormLegend/rcodex`, clean `main` at the latest pushed commit;
-  release tags through `v0.2.3` are present.
+  release tags through `v0.2.6` are present.
 - Mac mini: independent launchd service `com.stormlegend.rcodex-go`, loopback
-  `127.0.0.1:18890`, separate config and database; v0.2.3 deployed.
+  `127.0.0.1:18890`, separate config and database; v0.2.6 deployed.
 - Old Linux Node service and its existing tunnel remain active.
 - Last baseline verification: Go tests, race detector, vet, Mac health and
   authenticated sessions API passed. These do not establish full parity.
@@ -53,7 +53,7 @@ each gateway owns its sessions and data, and in-flight operations cannot move.
 - Short concurrent load test and backup/restore/rotation drills pass. A real
   24-hour and 72-hour elapsed soak still needs to run and be recorded.
 - A chained low-rate 24-hour then 72-hour read-only soak is running on Mac mini
-  as PID 38855 using an environment token (not a command-line argument). The
+  as PID 39069 using an environment token (not a command-line argument). The
   chain has a zero-failure gate and keeps separate phase logs; its final result
   is intentionally pending until both phases exit. The initial test token was
   rotated immediately after a process-list visibility check. Mac mini also has
