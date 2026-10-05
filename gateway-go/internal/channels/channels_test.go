@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"strings"
@@ -17,6 +18,7 @@ import (
 	"time"
 
 	"github.com/StormLegend/rcodex/gateway-go/internal/config"
+	"github.com/StormLegend/rcodex/gateway-go/internal/store"
 )
 
 func TestTelegramWebhook(t *testing.T) {
@@ -77,5 +79,48 @@ func TestFeishuEncryptedEvent(t *testing.T) {
 	Feishu(func(_ context.Context, m Message) error { got = m; return nil }, c).ServeHTTP(w, r)
 	if w.Code != 204 || got.Text != "hello" {
 		t.Fatalf("code=%d got=%+v body=%s", w.Code, got, w.Body.String())
+	}
+}
+
+func TestDurableDeliveryProviderProtocolsWithLocalBase(t *testing.T) {
+	var paths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		if strings.HasSuffix(r.URL.Path, "tenant_access_token/internal") {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"tenant_access_token":"tenant-test"}`))
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"code":0}`))
+	}))
+	defer srv.Close()
+	base := srv.URL
+	c := config.Config{Channels: map[string]config.Channel{
+		"telegram": {Token: "telegram-token", APIBaseURL: base},
+		"discord":  {AppID: "app", APIBaseURL: base},
+		"feishu":   {AppID: "app", AppSecret: "secret", APIBaseURL: base},
+	}}
+	ctx := context.Background()
+	if err := DeliverWithClient(ctx, store.Delivery{Destination: store.Notification{Channel: "telegram", Chat: "42"}, Text: "tg"}, c, srv.Client()); err != nil {
+		t.Fatal(err)
+	}
+	if err := DeliverWithClient(ctx, store.Delivery{Destination: store.Notification{Channel: "discord", Chat: "42", Token: "interaction"}, Text: "dc"}, c, srv.Client()); err != nil {
+		t.Fatal(err)
+	}
+	if err := DeliverWithClient(ctx, store.Delivery{Destination: store.Notification{Channel: "feishu", Chat: "42"}, Text: "fs"}, c, srv.Client()); err != nil {
+		t.Fatal(err)
+	}
+	if len(paths) != 4 {
+		t.Fatalf("provider requests=%v", paths)
+	}
+	if paths[0] != "/bottelegram-token/sendMessage" {
+		t.Fatalf("telegram path=%v", paths[0])
+	}
+	if paths[1] != "/api/v10/webhooks/app/interaction" {
+		t.Fatalf("discord path=%v", paths[1])
+	}
+	if paths[2] != "/open-apis/auth/v3/tenant_access_token/internal" || paths[3] != "/open-apis/im/v1/messages" {
+		t.Fatalf("feishu paths=%v", paths[2:])
 	}
 }

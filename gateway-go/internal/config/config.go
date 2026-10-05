@@ -25,6 +25,7 @@ type Channel struct {
 	Model      string   `json:"model"`
 	Workspace  string   `json:"workspace"`
 	Mode       string   `json:"mode"`
+	APIBaseURL string   `json:"api_base_url,omitempty"`
 }
 type RelayPeer struct {
 	ConnectorToken string `json:"connector_token"`
@@ -161,6 +162,13 @@ func Load(file string) (Config, error) {
 		}
 		if ch.Mode == "full" && !c.AllowFull {
 			return c, errors.New("full access requires allow_full")
+		}
+		if ch.APIBaseURL != "" {
+			u, e := url.Parse(strings.TrimRight(ch.APIBaseURL, "/"))
+			if e != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Scheme != "https" && !Loopback(u.Hostname())) {
+				return c, fmt.Errorf("invalid %s api_base_url", name)
+			}
+			ch.APIBaseURL = strings.TrimRight(ch.APIBaseURL, "/")
 		}
 		if name == "telegram" && (len(ch.Secret) < 32 || ch.Token == "") {
 			return c, errors.New("telegram requires token and >=32 character secret")

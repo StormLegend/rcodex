@@ -252,26 +252,43 @@ var _ = time.Now
 // Deliver sends one durable outbox item. It deliberately uses the provider's
 // HTTPS APIs directly so delivery does not depend on a second gateway process.
 func Deliver(ctx context.Context, d store.Delivery, c config.Config) error {
-	ch := c.Channels[d.Destination.Channel]
 	client := &http.Client{Timeout: 15 * time.Second}
+	return DeliverWithClient(ctx, d, c, client)
+}
+
+// DeliverWithClient keeps the provider protocol identical while allowing a
+// bounded local transport in integration tests. Production callers should use
+// Deliver; APIBaseURL accepts HTTPS or loopback HTTP only.
+func DeliverWithClient(ctx context.Context, d store.Delivery, c config.Config, client *http.Client) error {
+	ch := c.Channels[d.Destination.Channel]
 	var endpoint string
 	var body []byte
+	base := ch.APIBaseURL
 	switch d.Destination.Channel {
 	case "telegram":
-		endpoint = "https://api.telegram.org/bot" + ch.Token + "/sendMessage"
+		if base == "" {
+			base = "https://api.telegram.org"
+		}
+		endpoint = base + "/bot" + ch.Token + "/sendMessage"
 		body, _ = json.Marshal(map[string]any{"chat_id": d.Destination.Chat, "text": d.Text, "disable_web_page_preview": true})
 	case "discord":
 		if d.Destination.Token == "" || ch.AppID == "" {
 			return errors.New("discord delivery requires interaction token and app_id")
 		}
-		endpoint = "https://discord.com/api/v10/webhooks/" + ch.AppID + "/" + d.Destination.Token
+		if base == "" {
+			base = "https://discord.com"
+		}
+		endpoint = base + "/api/v10/webhooks/" + ch.AppID + "/" + d.Destination.Token
 		body, _ = json.Marshal(map[string]any{"content": d.Text})
 	case "feishu":
-		token, err := feishuToken(ctx, client, ch)
+		if base == "" {
+			base = "https://open.feishu.cn"
+		}
+		token, err := feishuToken(ctx, client, ch, base)
 		if err != nil {
 			return err
 		}
-		endpoint = "https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=chat_id"
+		endpoint = base + "/open-apis/im/v1/messages?receive_id_type=chat_id"
 		content, _ := json.Marshal(map[string]string{"text": d.Text})
 		body, _ = json.Marshal(map[string]any{"receive_id": d.Destination.Chat, "msg_type": "text", "content": string(content)})
 		return postJSON(ctx, client, endpoint, body, map[string]string{"Authorization": "Bearer " + token})
@@ -281,14 +298,14 @@ func Deliver(ctx context.Context, d store.Delivery, c config.Config) error {
 	return postJSON(ctx, client, endpoint, body, nil)
 }
 
-func feishuToken(ctx context.Context, client *http.Client, ch config.Channel) (string, error) {
+func feishuToken(ctx context.Context, client *http.Client, ch config.Channel, base string) (string, error) {
 	body, _ := json.Marshal(map[string]string{"app_id": ch.AppID, "app_secret": ch.AppSecret})
 	var out struct {
 		TenantAccessToken string `json:"tenant_access_token"`
 		Code              int    `json:"code"`
 		Msg               string `json:"msg"`
 	}
-	if err := postDecode(ctx, client, "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal", body, nil, &out); err != nil {
+	if err := postDecode(ctx, client, base+"/open-apis/auth/v3/tenant_access_token/internal", body, nil, &out); err != nil {
 		return "", err
 	}
 	if out.TenantAccessToken == "" {
