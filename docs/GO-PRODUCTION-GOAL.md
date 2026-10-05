@@ -31,6 +31,10 @@ each gateway owns its sessions and data, and in-flight operations cannot move.
 
 - Repository: `StormLegend/rcodex`, clean `main` at the latest pushed commit;
   release tags through `v0.2.7` are present.
+- GitHub Release `v0.2.7` exposes `darwin_amd64`, `darwin_arm64`,
+  `linux_amd64`, `linux_arm64`, `windows_amd64` archives and `SHA256SUMS`;
+  the release endpoints returned HTTP 200 and the published manifest was
+  downloaded for verification.
 - Mac mini: independent launchd service `com.stormlegend.rcodex-go`, loopback
   `127.0.0.1:18890`, separate config and database; v0.2.7 deployed.
 - Old Linux Node service and its existing tunnel remain active.
@@ -58,3 +62,5 @@ each gateway owns its sessions and data, and in-flight operations cannot move.
   is intentionally pending until both phases exit. The initial test token was
   rotated immediately after a process-list visibility check. Mac mini also has
   a non-secret metadata record at `Applications/rcodex-go/soak-chain.json`.
+- Latest observed 24-hour phase report: `requests=60 failed=0`; the 72-hour
+  phase will be created only after the first phase exits successfully.
