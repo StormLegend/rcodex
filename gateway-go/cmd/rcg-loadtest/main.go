@@ -45,6 +45,7 @@ func main() {
 	concurrency := flag.Int("concurrency", 4, "workers")
 	pause := flag.Duration("pause", 100*time.Millisecond, "pause between requests per worker")
 	report := flag.Duration("report-interval", time.Minute, "periodic progress report interval")
+	maxFailed := flag.Int64("max-failed", -1, "exit non-zero when failed requests exceed this value; -1 disables the gate")
 	flag.Parse()
 	if *duration <= 0 || *concurrency < 1 || *concurrency > 1000 || *pause < 0 || *report <= 0 {
 		fail("invalid duration or concurrency")
@@ -105,6 +106,9 @@ func main() {
 	b := c.buckets
 	c.mu.Unlock()
 	fmt.Printf("duration=%s concurrency=%d requests=%d failed=%d p95_bucket=%s\n", *duration, *concurrency, atomic.LoadInt64(&c.total), atomic.LoadInt64(&c.failed), bucket(b, 0.95))
+	if *maxFailed >= 0 && atomic.LoadInt64(&c.failed) > *maxFailed {
+		os.Exit(1)
+	}
 }
 func bucket(b [10]int64, q float64) string {
 	total := int64(0)

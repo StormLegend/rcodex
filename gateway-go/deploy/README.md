@@ -13,3 +13,8 @@ unit is stopped; it validates the backup and preserves a pre-restore backup.
 `rcg-admin rotate-token` rewrites a literal-token config atomically and prints a
 new secret. Restart the Go unit after rotating it; clients must be updated
 through the normal secret distribution channel.
+
+`rcg-loadtest` exercises the read-only sessions API. A short run is not evidence
+of a 24/72-hour soak; `soak-chain.sh` runs the 24-hour phase and then the
+72-hour phase with a zero-failure gate. Both logs must reach their final
+summaries before the soak is accepted.
