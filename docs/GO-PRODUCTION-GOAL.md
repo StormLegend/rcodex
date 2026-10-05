@@ -35,6 +35,9 @@ each gateway owns its sessions and data, and in-flight operations cannot move.
   `linux_amd64`, `linux_arm64`, `windows_amd64` archives and `SHA256SUMS`;
   the release endpoints returned HTTP 200 and the published manifest was
   downloaded for verification.
+- GitHub workflow `.github/workflows/gateway-go-ci.yml` now runs unit tests,
+  the race detector and `go vet` for gateway changes on pushes and pull
+  requests; the same checks pass locally after the latest test-only change.
 - Mac mini: independent launchd service `com.stormlegend.rcodex-go`, loopback
   `127.0.0.1:18890`, separate config and database; v0.2.7 deployed.
 - Old Linux Node service and its existing tunnel remain active.
@@ -67,3 +70,5 @@ each gateway owns its sessions and data, and in-flight operations cannot move.
 - A fresh local cross-build matrix produced all six binaries for each of
   `linux/amd64`, `linux/arm64`, `darwin/amd64`, `darwin/arm64` and
   `windows/amd64`; the same matrix is published by the tag release workflow.
+- Health transition alert delivery has a regression test covering the POST
+  JSON webhook path.
