@@ -46,6 +46,7 @@ func (s *Server) Handler() http.Handler {
 	m.HandleFunc("/api/schedules", s.schedules)
 	m.HandleFunc("/api/schedules/", s.schedule)
 	m.HandleFunc("/api/providers", s.providers)
+	m.HandleFunc("/api/providers/", s.provider)
 	m.HandleFunc("/api/models", s.models)
 	if c, ok := s.Cfg.Channels["telegram"]; ok {
 		m.Handle("/webhooks/telegram", channels.Telegram(s.channelMessage, c))
@@ -272,23 +273,33 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Method == http.MethodPatch {
 		var x struct {
-			Model string `json:"model"`
-			Mode  string `json:"mode"`
-			Title string `json:"title"`
+			Model *string `json:"model"`
+			Mode  *string `json:"mode"`
+			Title *string `json:"title"`
 		}
 		if json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&x) != nil {
 			s.writeErr(w, errors.New("invalid body"))
 			return
 		}
-		if x.Mode != "readonly" && x.Mode != "ask" && x.Mode != "auto" && x.Mode != "full" {
+		model, mode, title := v.Model, v.Mode, v.Title
+		if x.Model != nil {
+			model = *x.Model
+		}
+		if x.Mode != nil {
+			mode = *x.Mode
+		}
+		if x.Title != nil {
+			title = *x.Title
+		}
+		if mode != "readonly" && mode != "ask" && mode != "auto" && mode != "full" {
 			s.writeErr(w, errors.New("invalid permission mode"))
 			return
 		}
-		if x.Mode == "full" && !s.Cfg.AllowFull {
+		if mode == "full" && !s.Cfg.AllowFull {
 			s.writeErr(w, errors.New("full access is disabled"))
 			return
 		}
-		v, e = s.Store.UpdateSession(id, x.Model, x.Mode, x.Title)
+		v, e = s.Store.UpdateSession(id, model, mode, title)
 		if e != nil {
 			s.writeErr(w, e)
 			return
@@ -604,6 +615,43 @@ func (s *Server) providers(w http.ResponseWriter, r *http.Request) {
 		out[name] = map[string]any{"runtime": p.Runtime, "models": p.Models, "enabled": p.Enabled}
 	}
 	s.write(w, http.StatusOK, map[string]any{"providers": out})
+}
+func (s *Server) provider(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.NotFound(w, r)
+		return
+	}
+	tail := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/providers/"), "/")
+	parts := strings.Split(tail, "/")
+	if len(parts) == 0 || parts[0] == "" {
+		http.NotFound(w, r)
+		return
+	}
+	name := parts[0]
+	var value any
+	if name == "codex" {
+		value = map[string]any{"name": name, "runtime": "codex", "command": s.Cfg.CodexCommand, "enabled": true}
+	} else if name == "claude" {
+		value = map[string]any{"name": name, "runtime": "claude", "command": s.Cfg.ClaudeCommand, "enabled": true}
+	} else if p, ok := s.Cfg.Providers[name]; ok {
+		value = map[string]any{"name": name, "runtime": p.Runtime, "models": p.Models, "enabled": p.Enabled}
+	} else {
+		http.NotFound(w, r)
+		return
+	}
+	if len(parts) == 2 && parts[1] == "models" {
+		if m, ok := value.(map[string]any)["models"]; ok {
+			s.write(w, http.StatusOK, map[string]any{"provider": name, "models": m})
+			return
+		}
+		s.write(w, http.StatusOK, map[string]any{"provider": name, "models": []string{}})
+		return
+	}
+	if len(parts) != 1 {
+		http.NotFound(w, r)
+		return
+	}
+	s.write(w, http.StatusOK, map[string]any{"provider": value})
 }
 func (s *Server) models(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {

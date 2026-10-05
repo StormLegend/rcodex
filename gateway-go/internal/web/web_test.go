@@ -76,6 +76,14 @@ func TestSessionLifecycleAttachmentsSchedulesAndModels(t *testing.T) {
 	if w.Code != 200 {
 		t.Fatal(w.Code)
 	}
+	w = req(t, h, http.MethodGet, "/api/providers/claude/models", nil)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"provider":"claude"`) {
+		t.Fatalf("provider models status=%d body=%s", w.Code, w.Body.String())
+	}
+	w = req(t, h, http.MethodPatch, "/api/sessions/"+created.Session.ID, bytes.NewBufferString(`{"title":"renamed"}`))
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"renamed"`) {
+		t.Fatalf("partial patch status=%d body=%s", w.Code, w.Body.String())
+	}
 	w = req(t, h, http.MethodGet, "/api/sessions/"+created.Session.ID+"/turns", nil)
 	if w.Code != 200 {
 		t.Fatal(w.Code)
