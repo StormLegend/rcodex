@@ -30,8 +30,8 @@ each gateway owns its sessions and data, and in-flight operations cannot move.
 ## Baseline evidence
 
 - Repository: `StormLegend/rcodex`, clean `main` at the latest pushed commit;
-  release tags through `v0.2.8` are present.
-- GitHub Release `v0.2.8` exposes `darwin_amd64`, `darwin_arm64`,
+  release tags through `v0.2.9` are present.
+- GitHub Release `v0.2.9` exposes `darwin_amd64`, `darwin_arm64`,
   `linux_amd64`, `linux_arm64`, `windows_amd64` archives and `SHA256SUMS`;
   the release endpoints returned HTTP 200 and the published manifest was
   downloaded for verification.
@@ -39,8 +39,8 @@ each gateway owns its sessions and data, and in-flight operations cannot move.
   the race detector and `go vet` for gateway changes on pushes and pull
   requests; the same checks pass locally after the latest test-only change.
 - Mac mini: independent launchd service `com.stormlegend.rcodex-go`, loopback
-  `127.0.0.1:18890`, separate config and database; v0.2.8 deployed through the
-  health-gated atomic upgrade script. v0.2.7 remains available for rollback.
+  `127.0.0.1:18890`, separate config and database; v0.2.9 deployed through the
+  health-gated atomic upgrade script. v0.2.8 remains available for rollback.
 - Old Linux Node service and its existing tunnel remain active.
 - Last baseline verification: Go tests, race detector, vet, Mac health and
   authenticated sessions API passed. These do not establish full parity.
@@ -76,9 +76,12 @@ each gateway owns its sessions and data, and in-flight operations cannot move.
 - v0.2.8 fixes Claude cancellation classification and process-group cleanup;
   the regression test confirms cancellation returns `context.Canceled` and
   reaps a child process that has spawned a descendant.
+- v0.2.9 adds `next_before` / `next_after` cursors to session, history and
+  event APIs; store and HTTP tests exercise fetching the following page.
 - Before upgrading, the Go SQLite database was backed up to the Mac mini
-  `Applications/rcodex-go/backups/pre-v0.2.8-*.db` path and the new release
+  `Applications/rcodex-go/backups/pre-v0.2.9-*.db` path and the new release
   passed `-doctor` plus the live health version gate.
-- The v0.2.7 soak was intentionally stopped before the binary change. A new
-  environment-token chained soak is now running as v0.2.8 PID 40059 with
-  separate logs under `Library/Logs/rcodex-go-soak-chain-v0.2.8`.
+- The v0.2.8 soak was intentionally stopped before the pagination binary
+  change. A new environment-token chained soak is now running as v0.2.9 PID
+  40470 with separate logs under
+  `Library/Logs/rcodex-go-soak-chain-v0.2.9`.
