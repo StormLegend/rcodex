@@ -370,6 +370,7 @@ func (a *Claude) Turn(ctx context.Context, s Session, prompt string, h Handler) 
 	cmd := exec.CommandContext(ctx, a.command, args...)
 	cmd.Dir = s.CWD
 	cmd.Stderr = io.Discard
+	configureCommand(cmd)
 	in, e := cmd.StdinPipe()
 	if e != nil {
 		return "", e
@@ -381,6 +382,15 @@ func (a *Claude) Turn(ctx context.Context, s Session, prompt string, h Handler) 
 	if e = cmd.Start(); e != nil {
 		return "", e
 	}
+	watchDone := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = killCommandGroup(cmd)
+		case <-watchDone:
+		}
+	}()
+	defer close(watchDone)
 	a.mu.Lock()
 	a.procs[s.ID] = cmd
 	a.mu.Unlock()
@@ -420,8 +430,15 @@ func (a *Claude) Turn(ctx context.Context, s Session, prompt string, h Handler) 
 		_ = cmd.Process.Kill()
 		return "", e
 	}
-	if e := cmd.Wait(); e != nil {
-		return result, e
+	waitErr := cmd.Wait()
+	// CommandContext reaps the child on cancellation. Preserve the context
+	// error so the engine records cancelled/timed_out instead of the platform
+	// specific "signal: killed" process error.
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return "", ctxErr
+	}
+	if waitErr != nil {
+		return result, waitErr
 	}
 	return result, nil
 }
