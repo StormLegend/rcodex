@@ -80,6 +80,9 @@ each gateway owns its sessions and data, and in-flight operations cannot move.
 - Before upgrading, the Go SQLite database was backed up to the Mac mini
   `Applications/rcodex-go/backups/pre-v0.2.9-*.db` path and the new release
   passed `-doctor` plus the live health version gate.
+- The macOS/Linux upgrade scripts now reject a supplied SHA256 mismatch before
+  creating a release directory; shell syntax and a negative checksum gate were
+  verified locally.
 - The v0.2.8 soak was intentionally stopped before the pagination binary
   change. A new environment-token chained soak is now running as v0.2.9 PID
   40470 with separate logs under
