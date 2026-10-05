@@ -43,8 +43,9 @@ func main() {
 	token := flag.String("token", "", "bearer token")
 	duration := flag.Duration("duration", time.Minute, "test duration")
 	concurrency := flag.Int("concurrency", 4, "workers")
+	pause := flag.Duration("pause", 100*time.Millisecond, "pause between requests per worker")
 	flag.Parse()
-	if *duration <= 0 || *concurrency < 1 || *concurrency > 1000 {
+	if *duration <= 0 || *concurrency < 1 || *concurrency > 1000 || *pause < 0 {
 		fail("invalid duration or concurrency")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), *duration)
@@ -72,6 +73,13 @@ func main() {
 					}
 				}
 				c.add(time.Since(start), ok)
+				if *pause > 0 {
+					select {
+					case <-ctx.Done():
+						return
+					case <-time.After(*pause):
+					}
+				}
 			}
 		}()
 	}
