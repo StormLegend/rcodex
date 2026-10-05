@@ -86,6 +86,25 @@ type Schedule struct {
 	Paused     bool   `json:"paused"`
 }
 
+type SessionPage struct {
+	Items      []Session
+	NextBefore int64
+	HasMore    bool
+}
+
+type TurnPage struct {
+	Items      []Turn
+	NextBefore int64
+	HasMore    bool
+}
+
+type EventPage struct {
+	Items      []Event
+	NextAfter  int64
+	NextBefore int64
+	HasMore    bool
+}
+
 func ID() string {
 	var b [16]byte
 	if _, e := rand.Read(b[:]); e != nil {
@@ -160,49 +179,89 @@ func (s *Store) Session(id string) (Session, error) {
 	return scanSession(s.DB.QueryRow(`SELECT * FROM sessions WHERE id=?`, id))
 }
 func (s *Store) Sessions(before int64, limit int) ([]Session, error) {
+	p, e := s.SessionsPage(before, limit)
+	return p.Items, e
+}
+func (s *Store) SessionsPage(before int64, limit int) (SessionPage, error) {
+	page := SessionPage{}
 	if limit < 1 || limit > 500 {
 		limit = 100
 	}
 	if before == 0 {
 		before = 1 << 62
 	}
-	rows, e := s.DB.Query(`SELECT * FROM sessions WHERE rowid<? ORDER BY rowid DESC LIMIT ?`, before, limit)
+	rows, e := s.DB.Query(`SELECT rowid,* FROM sessions WHERE rowid<? ORDER BY rowid DESC LIMIT ?`, before, limit+1)
 	if e != nil {
-		return nil, e
+		return page, e
 	}
 	defer rows.Close()
 	out := []Session{}
+	rowIDs := []int64{}
 	for rows.Next() {
-		v, e := scanSession(rows)
-		if e != nil {
-			return nil, e
+		var rowid int64
+		var v Session
+		if e := rows.Scan(&rowid, &v.ID, &v.Runtime, &v.NativeID, &v.Workspace, &v.Model, &v.Mode, &v.Title, &v.Created); e != nil {
+			return page, e
 		}
+		rowIDs = append(rowIDs, rowid)
 		out = append(out, v)
 	}
-	return out, rows.Err()
+	if e := rows.Err(); e != nil {
+		return page, e
+	}
+	if len(out) > limit {
+		page.HasMore = true
+		out = out[:limit]
+	}
+	page.Items = out
+	if page.HasMore && len(out) > 0 {
+		page.NextBefore = rowIDs[len(out)-1]
+	}
+	return page, nil
 }
 func (s *Store) Turns(session string, before int64, limit int) ([]Turn, error) {
+	p, e := s.TurnsPage(session, before, limit)
+	return p.Items, e
+}
+func (s *Store) TurnsPage(session string, before int64, limit int) (TurnPage, error) {
+	page := TurnPage{}
 	if limit < 1 || limit > 500 {
 		limit = 100
 	}
 	if before == 0 {
 		before = 1 << 62
 	}
-	rows, e := s.DB.Query(`SELECT * FROM turns WHERE session_id=? AND rowid<? ORDER BY rowid DESC LIMIT ?`, session, before, limit)
+	rows, e := s.DB.Query(`SELECT rowid,* FROM turns WHERE session_id=? AND rowid<? ORDER BY rowid DESC LIMIT ?`, session, before, limit+1)
 	if e != nil {
-		return nil, e
+		return page, e
 	}
 	defer rows.Close()
 	out := []Turn{}
+	rowIDs := []int64{}
 	for rows.Next() {
-		v, e := scanTurn(rows)
-		if e != nil {
-			return nil, e
+		var rowid int64
+		var v Turn
+		var idem sql.NullString
+		if e := rows.Scan(&rowid, &v.ID, &v.SessionID, &v.Prompt, &v.State, &v.Result, &v.Error, &v.Created, &v.Updated, &v.Notify, &idem); e != nil {
+			return page, e
 		}
+		rowIDs = append(rowIDs, rowid)
 		out = append(out, v)
 	}
-	return out, rows.Err()
+	if e := rows.Err(); e != nil {
+		return page, e
+	}
+	if len(out) > limit {
+		page.HasMore = true
+		out = out[:limit]
+	}
+	page.Items = out
+	if page.HasMore && len(out) > 0 {
+		page.NextBefore = rowIDs[len(out)-1]
+	}
+	return page, nil
 }
+
 func (s *Store) Native(id, native string) error {
 	_, e := s.DB.Exec(`UPDATE sessions SET native_id=? WHERE id=?`, native, id)
 	return e
@@ -438,31 +497,54 @@ func (s *Store) DeleteAttachment(id string) (Attachment, error) {
 	return v, tx.Commit()
 }
 func (s *Store) Events(id string, after, before int64, limit int) ([]Event, error) {
+	p, e := s.EventsPage(id, after, before, limit)
+	return p.Items, e
+}
+func (s *Store) EventsPage(id string, after, before int64, limit int) (EventPage, error) {
+	page := EventPage{}
+	if limit < 1 || limit > 500 {
+		limit = 100
+	}
 	q := `SELECT id,session_id,turn_id,kind,data,created FROM events WHERE session_id=? AND id>? ORDER BY id LIMIT ?`
-	args := []any{id, after, limit}
+	args := []any{id, after, limit + 1}
 	if before > 0 {
 		q = `SELECT id,session_id,turn_id,kind,data,created FROM events WHERE session_id=? AND id<? ORDER BY id DESC LIMIT ?`
-		args = []any{id, before, limit}
+		args = []any{id, before, limit + 1}
 	}
 	rows, e := s.DB.Query(q, args...)
 	if e != nil {
-		return nil, e
+		return page, e
 	}
 	defer rows.Close()
 	out := []Event{}
 	for rows.Next() {
 		var v Event
 		if e = rows.Scan(&v.ID, &v.SessionID, &v.TurnID, &v.Kind, &v.Data, &v.Created); e != nil {
-			return nil, e
+			return page, e
 		}
 		out = append(out, v)
+	}
+	if e = rows.Err(); e != nil {
+		return page, e
+	}
+	if len(out) > limit {
+		page.HasMore = true
+		out = out[:limit]
 	}
 	if before > 0 {
 		for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
 			out[i], out[j] = out[j], out[i]
 		}
 	}
-	return out, rows.Err()
+	page.Items = out
+	if page.HasMore && len(out) > 0 {
+		if before > 0 {
+			page.NextBefore = out[0].ID
+		} else {
+			page.NextAfter = out[len(out)-1].ID
+		}
+	}
+	return page, nil
 }
 func (s *Store) NewApproval(t Turn, request any) (Approval, error) {
 	v := Approval{ID: ID(), SessionID: t.SessionID, TurnID: t.ID, Request: JSON(request), State: "pending", Created: Now()}

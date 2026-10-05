@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -123,5 +124,31 @@ func TestAuthRateLimitSeparatesHealth(t *testing.T) {
 	h.ServeHTTP(health, httptest.NewRequest(http.MethodGet, "/healthz", nil))
 	if health.Code != http.StatusOK {
 		t.Fatalf("health=%d", health.Code)
+	}
+}
+
+func TestSessionPaginationReturnsNextCursor(t *testing.T) {
+	s, root := testServer(t)
+	h := s.Handler()
+	for i := 0; i < 2; i++ {
+		body := bytes.NewBufferString(`{"runtime":"codex","workspace":"` + root + `","mode":"ask"}`)
+		if w := req(t, h, http.MethodPost, "/api/sessions", body); w.Code != http.StatusCreated {
+			t.Fatalf("create status=%d body=%s", w.Code, w.Body)
+		}
+	}
+	w := req(t, h, http.MethodGet, "/api/sessions?limit=1", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("first page status=%d", w.Code)
+	}
+	var page struct {
+		Sessions   []store.Session `json:"sessions"`
+		NextBefore int64           `json:"next_before"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &page); err != nil || len(page.Sessions) != 1 || page.NextBefore == 0 {
+		t.Fatalf("first page=%+v err=%v", page, err)
+	}
+	w = req(t, h, http.MethodGet, "/api/sessions?limit=1&before="+strconv.FormatInt(page.NextBefore, 10), nil)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"sessions"`) {
+		t.Fatalf("second page status=%d body=%s", w.Code, w.Body)
 	}
 }

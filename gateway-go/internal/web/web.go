@@ -160,12 +160,12 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
 	if r.Method == "GET" {
 		before, _ := strconv.ParseInt(r.URL.Query().Get("before"), 10, 64)
-		v, e := s.Store.Sessions(before, queryLimit(r.URL.Query().Get("limit"), 100, 500))
+		page, e := s.Store.SessionsPage(before, queryLimit(r.URL.Query().Get("limit"), 100, 500))
 		if e != nil {
 			s.writeErr(w, e)
 			return
 		}
-		s.write(w, 200, map[string]any{"sessions": v})
+		s.write(w, 200, map[string]any{"sessions": page.Items, "next_before": page.NextBefore})
 		return
 	}
 	if r.Method == "POST" {
@@ -232,12 +232,12 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request) {
 	if len(parts) > 1 && parts[1] == "events" {
 		after, _ := strconv.ParseInt(r.URL.Query().Get("after"), 10, 64)
 		before, _ := strconv.ParseInt(r.URL.Query().Get("before"), 10, 64)
-		ev, e := s.Store.Events(id, after, before, 100)
+		page, e := s.Store.EventsPage(id, after, before, queryLimit(r.URL.Query().Get("limit"), 100, 500))
 		if e != nil {
 			s.writeErr(w, e)
 			return
 		}
-		s.write(w, 200, map[string]any{"events": ev})
+		s.write(w, 200, map[string]any{"events": page.Items, "next_after": page.NextAfter, "next_before": page.NextBefore})
 		return
 	}
 	if len(parts) > 1 && (parts[1] == "turns" || parts[1] == "history") {
@@ -246,12 +246,12 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		before, _ := strconv.ParseInt(r.URL.Query().Get("before"), 10, 64)
-		items, e := s.Store.Turns(id, before, queryLimit(r.URL.Query().Get("limit"), 100, 500))
+		page, e := s.Store.TurnsPage(id, before, queryLimit(r.URL.Query().Get("limit"), 100, 500))
 		if e != nil {
 			s.writeErr(w, e)
 			return
 		}
-		s.write(w, http.StatusOK, map[string]any{"turns": items})
+		s.write(w, http.StatusOK, map[string]any{"turns": page.Items, "next_before": page.NextBefore})
 		return
 	}
 	if len(parts) > 1 && parts[1] == "attachments" {

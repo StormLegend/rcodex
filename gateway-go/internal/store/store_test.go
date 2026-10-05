@@ -48,6 +48,58 @@ func TestEventsCursor(t *testing.T) {
 	if e[0].ID != 1 {
 		t.Fatal(e)
 	}
+	p, err := s.EventsPage(v.ID, 0, 0, 2)
+	if err != nil || !p.HasMore || p.NextAfter != p.Items[len(p.Items)-1].ID {
+		t.Fatalf("event page=%+v err=%v", p, err)
+	}
+	older, err := s.EventsPage(v.ID, 0, p.NextAfter+1, 2)
+	if err != nil || len(older.Items) != 2 || older.Items[0].ID != 1 {
+		t.Fatalf("event before page=%+v err=%v", older, err)
+	}
+}
+
+func TestSessionAndTurnPageCursors(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "db.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.DB.Close()
+	for i := 0; i < 3; i++ {
+		if _, err = s.CreateSession(Session{Runtime: "codex", Workspace: "/tmp", Mode: "ask"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	first, err := s.SessionsPage(0, 1)
+	if err != nil || len(first.Items) != 1 || !first.HasMore || first.NextBefore == 0 {
+		t.Fatalf("first session page=%+v err=%v", first, err)
+	}
+	second, err := s.SessionsPage(first.NextBefore, 1)
+	if err != nil || len(second.Items) != 1 || second.Items[0].ID == first.Items[0].ID {
+		t.Fatalf("second session page=%+v err=%v", second, err)
+	}
+
+	session := first.Items[0]
+	for i := 0; i < 3; i++ {
+		tn, e := s.Enqueue(session.ID, "prompt", "turn-"+string(rune('a'+i)), "", 10)
+		if e != nil {
+			t.Fatal(e)
+		}
+		claimed, e := s.Claim()
+		if e != nil || claimed.ID != tn.ID {
+			t.Fatalf("claim=%+v err=%v", claimed, e)
+		}
+		if e = s.Finish(claimed, "done", nil); e != nil {
+			t.Fatal(e)
+		}
+	}
+	turns, err := s.TurnsPage(session.ID, 0, 2)
+	if err != nil || len(turns.Items) != 2 || !turns.HasMore || turns.NextBefore == 0 {
+		t.Fatalf("turn page=%+v err=%v", turns, err)
+	}
+	olderTurns, err := s.TurnsPage(session.ID, turns.NextBefore, 2)
+	if err != nil || len(olderTurns.Items) != 1 || olderTurns.Items[0].ID == turns.Items[0].ID {
+		t.Fatalf("older turn page=%+v err=%v", olderTurns, err)
+	}
 }
 
 func TestFinishQueuesDurableNotification(t *testing.T) {
