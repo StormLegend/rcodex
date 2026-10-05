@@ -74,6 +74,9 @@ each gateway owns its sessions and data, and in-flight operations cannot move.
   reaps a child process that has spawned a descendant.
 - v0.2.9 adds `next_before` / `next_after` cursors to session, history and
   event APIs; store and HTTP tests exercise fetching the following page.
+- A fresh isolated `rcg-admin` drill completed backup, restore, quick check,
+  pre-restore preservation and literal-token rotation without touching the
+  Mac mini data directory.
 - Before upgrading, the Go SQLite database was backed up to the Mac mini
   `Applications/rcodex-go/backups/pre-v0.2.9-*.db` path and the new release
   passed `-doctor` plus the live health version gate.
