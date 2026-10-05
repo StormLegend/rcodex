@@ -60,14 +60,10 @@ each gateway owns its sessions and data, and in-flight operations cannot move.
   were not present, so external acceptance remains open.
 - Short concurrent load test and backup/restore/rotation drills pass. A real
   24-hour and 72-hour elapsed soak still needs to run and be recorded.
-- A chained low-rate 24-hour then 72-hour read-only soak is running on Mac mini
-  as PID 39198 using an environment token (not a command-line argument). The
-  chain has a zero-failure gate and keeps separate phase logs; its final result
-  is intentionally pending until both phases exit. The initial test token was
-  rotated immediately after a process-list visibility check. Mac mini also has
-  a non-secret metadata record at `Applications/rcodex-go/soak-chain.json`.
-- Latest observed 24-hour phase report: `requests=60 failed=0`; the 72-hour
-  phase will be created only after the first phase exits successfully.
+- The historical v0.2.7 chained soak used an environment token (not a
+  command-line argument), a zero-failure gate and separate phase logs. It was
+  stopped before the v0.2.8 cancellation fix and its token was rotated after a
+  process-list visibility check.
 - A fresh local cross-build matrix produced all six binaries for each of
   `linux/amd64`, `linux/arm64`, `darwin/amd64`, `darwin/arm64` and
   `windows/amd64`; the same matrix is published by the tag release workflow.
