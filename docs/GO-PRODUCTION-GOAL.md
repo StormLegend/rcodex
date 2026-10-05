@@ -29,9 +29,10 @@ each gateway owns its sessions and data, and in-flight operations cannot move.
 
 ## Baseline evidence
 
-- Repository: `StormLegend/rcodex`, clean `main` at `1d8e891`, tag `v0.1.11`.
+- Repository: `StormLegend/rcodex`, clean `main` at the latest pushed commit;
+  release tags through `v0.2.3` are present.
 - Mac mini: independent launchd service `com.stormlegend.rcodex-go`, loopback
-  `127.0.0.1:18890`, separate config and database; v0.1.11 deployed.
+  `127.0.0.1:18890`, separate config and database; v0.2.3 deployed.
 - Old Linux Node service and its existing tunnel remain active.
 - Last baseline verification: Go tests, race detector, vet, Mac health and
   authenticated sessions API passed. These do not establish full parity.
@@ -46,12 +47,12 @@ each gateway owns its sessions and data, and in-flight operations cannot move.
   persistent schedules, Claude resume/cancellation and versioned deployment.
 - Pushed commit `f773e9b` and tag `v0.2.0`; Mac mini runs `v0.2.0` in
   `releases/v0.2.0/rcg`, while the legacy Node service remains active.
-- Local signed channel fixtures pass. Real Claude smoke reached the installed
+- Local signed channel and provider outbound fixtures pass. Real Claude smoke reached the installed
   CLI but reported `Not logged in`; real Telegram/Discord/Feishu credentials
   were not present, so external acceptance remains open.
 - Short concurrent load test and backup/restore/rotation drills pass. A real
   24-hour and 72-hour elapsed soak still needs to run and be recorded.
-- A low-rate 24-hour read-only soak is running on Mac mini as PID 38276 using
+- A low-rate 24-hour read-only soak is running on Mac mini as PID 38498 using
   an environment token (not a command-line argument); its final result is
   intentionally pending until the process exits. The initial test token was
   rotated immediately after a process-list visibility check.
