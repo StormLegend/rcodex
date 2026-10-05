@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/StormLegend/rcodex/gateway-go/internal/config"
 	"github.com/StormLegend/rcodex/gateway-go/internal/runtime"
 	"github.com/StormLegend/rcodex/gateway-go/internal/store"
@@ -20,10 +21,12 @@ type Engine struct {
 	Runtimes map[string]runtime.Runtime
 	cancel   context.CancelFunc
 	wg       sync.WaitGroup
+	activeMu sync.Mutex
+	active   map[string]context.CancelFunc
 }
 
 func New(s *store.Store, c config.Config, log *slog.Logger) *Engine {
-	return &Engine{Store: s, Config: c, Log: log, Runtimes: map[string]runtime.Runtime{"codex": runtime.NewCodex(c.CodexCommand), "claude": runtime.NewClaude(c.ClaudeCommand)}}
+	return &Engine{Store: s, Config: c, Log: log, Runtimes: map[string]runtime.Runtime{"codex": runtime.NewCodex(c.CodexCommand), "claude": runtime.NewClaude(c.ClaudeCommand)}, active: map[string]context.CancelFunc{}}
 }
 func (e *Engine) Start(ctx context.Context) {
 	ctx, e.cancel = context.WithCancel(ctx)
@@ -35,6 +38,8 @@ func (e *Engine) Start(ctx context.Context) {
 	for i := 0; i < workers; i++ {
 		go e.loop(ctx)
 	}
+	e.wg.Add(1)
+	go e.scheduleLoop(ctx)
 }
 func (e *Engine) loop(ctx context.Context) {
 	defer e.wg.Done()
@@ -55,6 +60,14 @@ func (e *Engine) loop(ctx context.Context) {
 func (e *Engine) run(parent context.Context, t store.Turn) {
 	ctx, cancel := context.WithTimeout(parent, time.Duration(e.Config.TurnSeconds)*time.Second)
 	defer cancel()
+	e.activeMu.Lock()
+	e.active[t.ID] = cancel
+	e.activeMu.Unlock()
+	defer func() {
+		e.activeMu.Lock()
+		delete(e.active, t.ID)
+		e.activeMu.Unlock()
+	}()
 	s, err := e.Store.Session(t.SessionID)
 	result := ""
 	if err == nil {
@@ -89,6 +102,30 @@ func (e *Engine) run(parent context.Context, t store.Turn) {
 	if err = e.Store.Finish(t, result, err); err != nil {
 		e.Log.Error("turn finish failed", "error", err)
 	}
+}
+
+// Cancel stops a running runtime process or marks a queued turn cancelled. It
+// never requeues a partially executed turn, because doing so could duplicate
+// external side effects.
+func (e *Engine) Cancel(turnID string) error {
+	for i := 0; i < 10; i++ {
+		e.activeMu.Lock()
+		cancel := e.active[turnID]
+		e.activeMu.Unlock()
+		if cancel != nil {
+			cancel()
+			return nil
+		}
+		t, err := e.Store.Turn(turnID)
+		if err != nil {
+			return err
+		}
+		if t.State != "running" {
+			return e.Store.CancelQueued(turnID)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return store.ErrBusy
 }
 
 func (e *Engine) handleEvent(ctx context.Context, t store.Turn, s store.Session, ev runtime.Event) error {
@@ -153,4 +190,53 @@ func (e *Engine) Stop() {
 	for _, r := range e.Runtimes {
 		_ = r.Stop()
 	}
+}
+
+func (e *Engine) scheduleLoop(ctx context.Context) {
+	defer e.wg.Done()
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			items, err := e.Store.DueSchedules(time.Now().UnixMilli(), 20)
+			if err != nil {
+				e.Log.Error("schedule scan failed", "error", err)
+				continue
+			}
+			for _, item := range items {
+				interval, once, parseErr := ParseScheduleInterval(item.Expression)
+				if parseErr != nil {
+					_ = e.Store.UpdateScheduleNext(item.ID, item.NextAt, true)
+					e.Log.Warn("schedule paused", "id", item.ID, "error", parseErr)
+					continue
+				}
+				_, enqueueErr := e.Store.Enqueue(item.SessionID, item.Prompt, "schedule:"+item.ID+":"+fmt.Sprint(item.NextAt), "", e.Config.QueueLimit)
+				if enqueueErr != nil && !errors.Is(enqueueErr, store.ErrBusy) {
+					e.Log.Warn("schedule enqueue failed", "id", item.ID, "error", enqueueErr)
+				}
+				if once || interval <= 0 {
+					_ = e.Store.UpdateScheduleNext(item.ID, item.NextAt, true)
+				} else {
+					_ = e.Store.UpdateScheduleNext(item.ID, time.Now().Add(interval).UnixMilli(), false)
+				}
+			}
+		}
+	}
+}
+
+func ParseScheduleInterval(expression string) (time.Duration, bool, error) {
+	expression = strings.TrimSpace(expression)
+	if expression == "" || expression == "once" {
+		return 0, true, nil
+	}
+	expression = strings.TrimPrefix(expression, "every:")
+	expression = strings.TrimSpace(strings.TrimPrefix(expression, "@every"))
+	d, err := time.ParseDuration(expression)
+	if err != nil || d < time.Second {
+		return 0, false, errors.New("schedule expression must be once or a duration of at least 1s")
+	}
+	return d, false, nil
 }

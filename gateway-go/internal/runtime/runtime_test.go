@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -23,6 +24,39 @@ func TestClaudeTurnWaitsForResult(t *testing.T) {
 	result, err := rt.Turn(context.Background(), s, "hello", func(Event) error { seen++; return nil })
 	if err != nil || result != "final answer" || seen != 2 {
 		t.Fatalf("result=%q events=%d err=%v", result, seen, err)
+	}
+}
+
+func TestClaudeUsesSessionIDThenResume(t *testing.T) {
+	d := t.TempDir()
+	script := filepath.Join(d, "fake-claude")
+	argsFile := filepath.Join(d, "args")
+	program := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$CLAUDE_TEST_ARGS\"\nread line\nprintf '%s\\n' '{\"result\":\"ok\"}'\n"
+	if err := os.WriteFile(script, []byte(program), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CLAUDE_TEST_ARGS", argsFile)
+	rt := NewClaude(script)
+	s, err := rt.Start(context.Background(), d, "", "readonly", nil)
+	if err != nil || s.ID == "" {
+		t.Fatalf("start=%+v err=%v", s, err)
+	}
+	if _, err = rt.Turn(context.Background(), s, "one", nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = rt.Resume(context.Background(), s, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = rt.Turn(context.Background(), s, "two", nil); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(b)), "\n")
+	if len(lines) != 2 || !strings.Contains(lines[0], "--session-id "+s.ID) || !strings.Contains(lines[1], "--resume "+s.ID) {
+		t.Fatalf("claude args=%q session=%s", string(b), s.ID)
 	}
 }
 

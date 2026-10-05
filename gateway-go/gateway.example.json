@@ -8,6 +8,12 @@
   "workers": 4,
   "queue_limit": 100,
   "turn_seconds": 600,
+  "rate_limit_per_minute": 120,
+  "read_rate_limit_per_minute": 600,
   "channels": {},
+  "providers": {
+    "default-codex": {"runtime":"codex", "models":[], "enabled":true},
+    "default-claude": {"runtime":"claude", "models":[], "enabled":true}
+  },
   "relay": {"url": "", "id": "", "token": "", "peers": {}}
 }

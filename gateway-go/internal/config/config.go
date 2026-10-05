@@ -37,25 +37,34 @@ type Relay struct {
 	Token string               `json:"token"`
 	Peers map[string]RelayPeer `json:"peers"`
 }
+type Provider struct {
+	Runtime string   `json:"runtime"`
+	Command string   `json:"command,omitempty"`
+	Models  []string `json:"models,omitempty"`
+	Enabled bool     `json:"enabled"`
+}
 type Config struct {
-	Listen          string             `json:"listen"`
-	DataDir         string             `json:"data_dir"`
-	Token           string             `json:"token"`
-	ReadToken       string             `json:"read_token"`
-	Roots           []string           `json:"roots"`
-	Workers         int                `json:"workers"`
-	QueueLimit      int                `json:"queue_limit"`
-	TurnSeconds     int                `json:"turn_seconds"`
-	CodexCommand    string             `json:"codex_command"`
-	ClaudeCommand   string             `json:"claude_command"`
-	CodexHome       string             `json:"codex_home"`
-	ClaudeHome      string             `json:"claude_home"`
-	AllowFull       bool               `json:"allow_full"`
-	TLSCert         string             `json:"tls_cert"`
-	TLSKey          string             `json:"tls_key"`
-	TrustedProxyTLS bool               `json:"trusted_proxy_tls"`
-	Channels        map[string]Channel `json:"channels"`
-	Relay           Relay              `json:"relay"`
+	Listen                 string              `json:"listen"`
+	DataDir                string              `json:"data_dir"`
+	Token                  string              `json:"token"`
+	ReadToken              string              `json:"read_token"`
+	Roots                  []string            `json:"roots"`
+	Workers                int                 `json:"workers"`
+	QueueLimit             int                 `json:"queue_limit"`
+	TurnSeconds            int                 `json:"turn_seconds"`
+	CodexCommand           string              `json:"codex_command"`
+	ClaudeCommand          string              `json:"claude_command"`
+	CodexHome              string              `json:"codex_home"`
+	ClaudeHome             string              `json:"claude_home"`
+	AllowFull              bool                `json:"allow_full"`
+	TLSCert                string              `json:"tls_cert"`
+	TLSKey                 string              `json:"tls_key"`
+	TrustedProxyTLS        bool                `json:"trusted_proxy_tls"`
+	RateLimitPerMinute     int                 `json:"rate_limit_per_minute"`
+	ReadRateLimitPerMinute int                 `json:"read_rate_limit_per_minute"`
+	Channels               map[string]Channel  `json:"channels"`
+	Providers              map[string]Provider `json:"providers"`
+	Relay                  Relay               `json:"relay"`
 }
 
 func Load(file string) (Config, error) {
@@ -83,6 +92,15 @@ func Load(file string) (Config, error) {
 	}
 	if c.Workers < 1 || c.Workers > 64 || c.QueueLimit < 1 || c.TurnSeconds < 1 {
 		return c, errors.New("invalid capacity configuration")
+	}
+	if c.RateLimitPerMinute == 0 {
+		c.RateLimitPerMinute = 120
+	}
+	if c.ReadRateLimitPerMinute == 0 {
+		c.ReadRateLimitPerMinute = 600
+	}
+	if c.RateLimitPerMinute < 1 || c.RateLimitPerMinute > 100000 || c.ReadRateLimitPerMinute < 1 || c.ReadRateLimitPerMinute > 100000 {
+		return c, errors.New("invalid rate limit configuration")
 	}
 	if len(c.Token) < 32 {
 		return c, errors.New("token must contain at least 32 characters")
@@ -157,6 +175,14 @@ func Load(file string) (Config, error) {
 			return c, e
 		}
 		c.Channels[name] = ch
+	}
+	for name, p := range c.Providers {
+		if !Identifier(name) || (p.Runtime != "codex" && p.Runtime != "claude") {
+			return c, fmt.Errorf("invalid provider %s", name)
+		}
+		if p.Command != "" && filepath.IsAbs(p.Command) == false && strings.ContainsAny(p.Command, "\n\r") {
+			return c, errors.New("invalid provider command")
+		}
 	}
 	if c.Relay.URL != "" {
 		u, e := url.Parse(c.Relay.URL)

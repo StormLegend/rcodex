@@ -1,0 +1,10 @@
+{
+  "targets": [
+    {"name":"go","kind":"go","url":"http://127.0.0.1:18890","console_url":"http://127.0.0.1:18890/console","health_path":"/healthz"},
+    {"name":"legacy","kind":"legacy","url":"http://127.0.0.1:18787","console_url":"http://127.0.0.1:18787","health_path":"/healthz"}
+  ],
+  "state_file":"selected.json",
+  "timeout_seconds":5,
+  "failure_threshold":3,
+  "recovery_threshold":2
+}

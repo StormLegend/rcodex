@@ -73,3 +73,29 @@ func TestFinishQueuesDurableNotification(t *testing.T) {
 		t.Fatalf("delivery=%+v", d[0])
 	}
 }
+
+func TestDeleteSessionAndSchedules(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "db.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.DB.Close()
+	v, err := s.CreateSession(Session{Runtime: "codex", Workspace: "/tmp", Mode: "ask"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := s.AddAttachment(Attachment{SessionID: v.ID, Name: "x", Path: "/tmp/x", Mime: "text/plain", Size: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.CreateSchedule(Schedule{SessionID: v.ID, Prompt: "p", Expression: "once"}); err != nil {
+		t.Fatal(err)
+	}
+	paths, err := s.DeleteSession(v.ID)
+	if err != nil || len(paths) != 1 || paths[0] != a.Path {
+		t.Fatalf("paths=%v err=%v", paths, err)
+	}
+	if _, err = s.Session(v.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("session remains: %v", err)
+	}
+}

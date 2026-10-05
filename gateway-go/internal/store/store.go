@@ -68,6 +68,23 @@ type Delivery struct {
 	Text        string
 	Attempts    int
 }
+type Attachment struct {
+	ID        string `json:"id"`
+	SessionID string `json:"session_id"`
+	Name      string `json:"name"`
+	Path      string `json:"-"`
+	Mime      string `json:"mime"`
+	Size      int64  `json:"size"`
+	Created   int64  `json:"created"`
+}
+type Schedule struct {
+	ID         string `json:"id"`
+	SessionID  string `json:"session_id"`
+	Prompt     string `json:"prompt"`
+	Expression string `json:"expression"`
+	NextAt     int64  `json:"next_at"`
+	Paused     bool   `json:"paused"`
+}
 
 func ID() string {
 	var b [16]byte
@@ -110,6 +127,8 @@ func Open(file string) (*Store, error) {
  CREATE TABLE IF NOT EXISTS bindings(id TEXT PRIMARY KEY,session_id TEXT NOT NULL REFERENCES sessions(id));
  CREATE TABLE IF NOT EXISTS outbox(id TEXT PRIMARY KEY,destination TEXT NOT NULL,text TEXT NOT NULL,attempts INTEGER NOT NULL DEFAULT 0,next_at INTEGER NOT NULL,state TEXT NOT NULL DEFAULT 'queued');
  CREATE TABLE IF NOT EXISTS schedules(id TEXT PRIMARY KEY,session_id TEXT NOT NULL REFERENCES sessions(id),prompt TEXT NOT NULL,expression TEXT NOT NULL,next_at INTEGER NOT NULL,paused INTEGER NOT NULL DEFAULT 0);
+ CREATE TABLE IF NOT EXISTS attachments(id TEXT PRIMARY KEY,session_id TEXT NOT NULL REFERENCES sessions(id),name TEXT NOT NULL,path TEXT NOT NULL,mime TEXT NOT NULL,size INTEGER NOT NULL,created INTEGER NOT NULL);
+ CREATE INDEX IF NOT EXISTS attachment_session ON attachments(session_id,created);
  PRAGMA user_version=1;`)
 	if e != nil {
 		db.Close()
@@ -141,6 +160,9 @@ func (s *Store) Session(id string) (Session, error) {
 	return scanSession(s.DB.QueryRow(`SELECT * FROM sessions WHERE id=?`, id))
 }
 func (s *Store) Sessions(before int64, limit int) ([]Session, error) {
+	if limit < 1 || limit > 500 {
+		limit = 100
+	}
 	if before == 0 {
 		before = 1 << 62
 	}
@@ -159,9 +181,86 @@ func (s *Store) Sessions(before int64, limit int) ([]Session, error) {
 	}
 	return out, rows.Err()
 }
+func (s *Store) Turns(session string, before int64, limit int) ([]Turn, error) {
+	if limit < 1 || limit > 500 {
+		limit = 100
+	}
+	if before == 0 {
+		before = 1 << 62
+	}
+	rows, e := s.DB.Query(`SELECT * FROM turns WHERE session_id=? AND rowid<? ORDER BY rowid DESC LIMIT ?`, session, before, limit)
+	if e != nil {
+		return nil, e
+	}
+	defer rows.Close()
+	out := []Turn{}
+	for rows.Next() {
+		v, e := scanTurn(rows)
+		if e != nil {
+			return nil, e
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}
 func (s *Store) Native(id, native string) error {
 	_, e := s.DB.Exec(`UPDATE sessions SET native_id=? WHERE id=?`, native, id)
 	return e
+}
+func (s *Store) UpdateSession(id, model, mode, title string) (Session, error) {
+	if _, e := s.Session(id); e != nil {
+		return Session{}, e
+	}
+	_, e := s.DB.Exec(`UPDATE sessions SET model=?,mode=?,title=? WHERE id=?`, model, mode, title, id)
+	if e != nil {
+		return Session{}, e
+	}
+	return s.Session(id)
+}
+func (s *Store) DeleteSession(id string) ([]string, error) {
+	tx, e := s.DB.Begin()
+	if e != nil {
+		return nil, e
+	}
+	defer tx.Rollback()
+	if _, e = scanSession(tx.QueryRow(`SELECT * FROM sessions WHERE id=?`, id)); e != nil {
+		return nil, e
+	}
+	var active int
+	if e = tx.QueryRow(`SELECT count(*) FROM turns WHERE session_id=? AND state IN ('queued','running')`, id).Scan(&active); e != nil {
+		return nil, e
+	}
+	if active > 0 {
+		return nil, ErrBusy
+	}
+	rows, e := tx.Query(`SELECT path FROM attachments WHERE session_id=?`, id)
+	if e != nil {
+		return nil, e
+	}
+	var paths []string
+	for rows.Next() {
+		var p string
+		if e = rows.Scan(&p); e != nil {
+			rows.Close()
+			return nil, e
+		}
+		paths = append(paths, p)
+	}
+	if e = rows.Close(); e != nil {
+		return nil, e
+	}
+	for _, q := range []string{
+		`DELETE FROM approvals WHERE session_id=?`, `DELETE FROM events WHERE session_id=?`,
+		`DELETE FROM outbox WHERE id IN (SELECT id FROM turns WHERE session_id=?)`,
+		`DELETE FROM attachments WHERE session_id=?`, `DELETE FROM schedules WHERE session_id=?`,
+		`DELETE FROM bindings WHERE session_id=?`, `DELETE FROM turns WHERE session_id=?`,
+		`DELETE FROM sessions WHERE id=?`,
+	} {
+		if _, e = tx.Exec(q, id); e != nil {
+			return nil, e
+		}
+	}
+	return paths, tx.Commit()
 }
 func scanTurn(row interface{ Scan(...any) error }) (Turn, error) {
 	var t Turn
@@ -285,6 +384,59 @@ func (s *Store) Event(session, turn, kind string, data any) (Event, error) {
 	id, e := res.LastInsertId()
 	return Event{id, session, turn, kind, b, Now()}, e
 }
+func (s *Store) AddAttachment(v Attachment) (Attachment, error) {
+	if v.ID == "" {
+		v.ID = ID()
+	}
+	v.Created = Now()
+	_, e := s.DB.Exec(`INSERT INTO attachments(id,session_id,name,path,mime,size,created) VALUES(?,?,?,?,?,?,?)`, v.ID, v.SessionID, v.Name, v.Path, v.Mime, v.Size, v.Created)
+	return v, e
+}
+func scanAttachment(row interface{ Scan(...any) error }) (Attachment, error) {
+	var v Attachment
+	e := row.Scan(&v.ID, &v.SessionID, &v.Name, &v.Path, &v.Mime, &v.Size, &v.Created)
+	if errors.Is(e, sql.ErrNoRows) {
+		e = ErrNotFound
+	}
+	return v, e
+}
+func (s *Store) Attachment(id string) (Attachment, error) {
+	return scanAttachment(s.DB.QueryRow(`SELECT * FROM attachments WHERE id=?`, id))
+}
+func (s *Store) Attachments(session string, limit int) ([]Attachment, error) {
+	if limit < 1 || limit > 500 {
+		limit = 100
+	}
+	rows, e := s.DB.Query(`SELECT * FROM attachments WHERE session_id=? ORDER BY created DESC LIMIT ?`, session, limit)
+	if e != nil {
+		return nil, e
+	}
+	defer rows.Close()
+	out := []Attachment{}
+	for rows.Next() {
+		v, e := scanAttachment(rows)
+		if e != nil {
+			return nil, e
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}
+func (s *Store) DeleteAttachment(id string) (Attachment, error) {
+	tx, e := s.DB.Begin()
+	if e != nil {
+		return Attachment{}, e
+	}
+	defer tx.Rollback()
+	v, e := scanAttachment(tx.QueryRow(`SELECT * FROM attachments WHERE id=?`, id))
+	if e != nil {
+		return v, e
+	}
+	if _, e = tx.Exec(`DELETE FROM attachments WHERE id=?`, id); e != nil {
+		return v, e
+	}
+	return v, tx.Commit()
+}
 func (s *Store) Events(id string, after, before int64, limit int) ([]Event, error) {
 	q := `SELECT id,session_id,turn_id,kind,data,created FROM events WHERE session_id=? AND id>? ORDER BY id LIMIT ?`
 	args := []any{id, after, limit}
@@ -359,8 +511,15 @@ func (s *Store) Resolve(id string, response any) error {
 	return nil
 }
 func (s *Store) CancelQueued(id string) error {
-	_, e := s.DB.Exec(`UPDATE turns SET state='cancelled',updated=? WHERE id=? AND state='queued'`, Now(), id)
-	return e
+	res, e := s.DB.Exec(`UPDATE turns SET state='cancelled',updated=? WHERE id=? AND state='queued'`, Now(), id)
+	if e != nil {
+		return e
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 func (s *Store) Bind(key string, v Session) (Session, error) {
 	var id string
@@ -387,6 +546,98 @@ func (s *Store) Bind(key string, v Session) (Session, error) {
 		return v, e
 	}
 	return v, tx.Commit()
+}
+func scanSchedule(row interface{ Scan(...any) error }) (Schedule, error) {
+	var v Schedule
+	var paused int
+	e := row.Scan(&v.ID, &v.SessionID, &v.Prompt, &v.Expression, &v.NextAt, &paused)
+	v.Paused = paused != 0
+	if errors.Is(e, sql.ErrNoRows) {
+		e = ErrNotFound
+	}
+	return v, e
+}
+func (s *Store) CreateSchedule(v Schedule) (Schedule, error) {
+	if v.ID == "" {
+		v.ID = ID()
+	}
+	if v.NextAt == 0 {
+		v.NextAt = Now()
+	}
+	_, e := s.DB.Exec(`INSERT INTO schedules(id,session_id,prompt,expression,next_at,paused) VALUES(?,?,?,?,?,?)`, v.ID, v.SessionID, v.Prompt, v.Expression, v.NextAt, boolInt(v.Paused))
+	return v, e
+}
+func boolInt(v bool) int {
+	if v {
+		return 1
+	}
+	return 0
+}
+func (s *Store) Schedules(session string, limit int) ([]Schedule, error) {
+	if limit < 1 || limit > 500 {
+		limit = 100
+	}
+	q := `SELECT * FROM schedules ORDER BY next_at LIMIT ?`
+	args := []any{limit}
+	if session != "" {
+		q = `SELECT * FROM schedules WHERE session_id=? ORDER BY next_at LIMIT ?`
+		args = []any{session, limit}
+	}
+	rows, e := s.DB.Query(q, args...)
+	if e != nil {
+		return nil, e
+	}
+	defer rows.Close()
+	out := []Schedule{}
+	for rows.Next() {
+		v, e := scanSchedule(rows)
+		if e != nil {
+			return nil, e
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}
+func (s *Store) DueSchedules(now int64, limit int) ([]Schedule, error) {
+	if limit < 1 || limit > 100 {
+		limit = 20
+	}
+	rows, e := s.DB.Query(`SELECT * FROM schedules WHERE paused=0 AND next_at<=? ORDER BY next_at LIMIT ?`, now, limit)
+	if e != nil {
+		return nil, e
+	}
+	defer rows.Close()
+	out := []Schedule{}
+	for rows.Next() {
+		v, e := scanSchedule(rows)
+		if e != nil {
+			return nil, e
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}
+func (s *Store) UpdateScheduleNext(id string, next int64, paused bool) error {
+	res, e := s.DB.Exec(`UPDATE schedules SET next_at=?,paused=? WHERE id=?`, next, boolInt(paused), id)
+	if e != nil {
+		return e
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+func (s *Store) DeleteSchedule(id string) error {
+	res, e := s.DB.Exec(`DELETE FROM schedules WHERE id=?`, id)
+	if e != nil {
+		return e
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 func (s *Store) Deliveries() ([]Delivery, error) {
 	rows, e := s.DB.Query(`SELECT id,destination,text,attempts FROM outbox WHERE state='queued' AND next_at<=? ORDER BY next_at LIMIT 10`, Now())

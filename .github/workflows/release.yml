@@ -32,6 +32,9 @@ jobs:
             GOOS="$os" GOARCH="$arch" CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X github.com/StormLegend/rcodex/gateway-go/internal/web.Version=$VERSION" -o "dist/$name/rcg$ext" ./cmd/rcg
             GOOS="$os" GOARCH="$arch" CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o "dist/$name/rcgctl$ext" ./cmd/rcgctl
             GOOS="$os" GOARCH="$arch" CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o "dist/$name/rcodex-relay$ext" ./cmd/rcg-relay
+            GOOS="$os" GOARCH="$arch" CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o "dist/$name/rcg-ops$ext" ./cmd/rcg-ops
+            GOOS="$os" GOARCH="$arch" CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o "dist/$name/rcg-admin$ext" ./cmd/rcg-admin
+            GOOS="$os" GOARCH="$arch" CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o "dist/$name/rcg-loadtest$ext" ./cmd/rcg-loadtest
             cp README.md gateway.example.json relay.example.json "dist/$name/"
             if [ "$os" = windows ]; then (cd dist && zip -qr "$name.zip" "$name"); else tar -C dist -czf "dist/$name.tar.gz" "$name"; fi
             rm -rf "dist/$name"

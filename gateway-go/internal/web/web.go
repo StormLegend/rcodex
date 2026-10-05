@@ -9,10 +9,15 @@ import (
 	"github.com/StormLegend/rcodex/gateway-go/internal/config"
 	"github.com/StormLegend/rcodex/gateway-go/internal/engine"
 	"github.com/StormLegend/rcodex/gateway-go/internal/store"
+	"io"
 	"log/slog"
+	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -37,6 +42,11 @@ func (s *Server) Handler() http.Handler {
 	m.HandleFunc("/api/turns/", s.turn)
 	m.HandleFunc("/api/approvals/", s.approval)
 	m.HandleFunc("/api/approvals", s.approvals)
+	m.HandleFunc("/api/attachments/", s.attachment)
+	m.HandleFunc("/api/schedules", s.schedules)
+	m.HandleFunc("/api/schedules/", s.schedule)
+	m.HandleFunc("/api/providers", s.providers)
+	m.HandleFunc("/api/models", s.models)
 	if c, ok := s.Cfg.Channels["telegram"]; ok {
 		m.Handle("/webhooks/telegram", channels.Telegram(s.channelMessage, c))
 	}
@@ -58,14 +68,79 @@ func (s *Server) channelMessage(ctx context.Context, m channels.Message) error {
 	_, e = s.Store.Enqueue(session.ID, m.Text, "channel:"+m.Channel+":"+m.ID, string(notify), s.Cfg.QueueLimit)
 	return e
 }
+
+type rateWindow struct {
+	Started time.Time
+	Count   int
+}
+type rateLimiter struct {
+	mu      sync.Mutex
+	windows map[string]rateWindow
+}
+
+func newRateLimiter() *rateLimiter { return &rateLimiter{windows: map[string]rateWindow{}} }
+func (l *rateLimiter) allow(key string, limit int) bool {
+	now := time.Now()
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	w := l.windows[key]
+	if now.Sub(w.Started) >= time.Minute {
+		w = rateWindow{Started: now}
+	}
+	if w.Count >= limit {
+		return false
+	}
+	w.Count++
+	l.windows[key] = w
+	if len(l.windows) > 10000 {
+		for k, old := range l.windows {
+			if now.Sub(old.Started) >= time.Minute {
+				delete(l.windows, k)
+			}
+		}
+	}
+	return true
+}
+func remoteKey(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err == nil {
+		return host
+	}
+	return r.RemoteAddr
+}
 func auth(c config.Config, next http.Handler) http.Handler {
+	limiter := newRateLimiter()
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/healthz" {
+			limit := c.RateLimitPerMinute
+			if r.Method == http.MethodGet || r.Method == http.MethodHead {
+				limit = c.ReadRateLimitPerMinute
+			}
+			class := "write"
+			if r.Method == http.MethodGet || r.Method == http.MethodHead {
+				class = "read"
+			}
+			if limit > 0 && !limiter.allow(remoteKey(r)+":"+class, limit) {
+				w.Header().Set("Retry-After", "60")
+				http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
+				return
+			}
+		}
 		if r.URL.Path == "/healthz" || r.URL.Path == "/console" || strings.HasPrefix(r.URL.Path, "/console/") || strings.HasPrefix(r.URL.Path, "/webhooks/") {
 			next.ServeHTTP(w, r)
 			return
 		}
 		v := r.Header.Get("Authorization")
-		if !strings.HasPrefix(v, "Bearer ") || subtle.ConstantTimeCompare([]byte(strings.TrimPrefix(v, "Bearer ")), []byte(c.Token)) != 1 {
+		if !strings.HasPrefix(v, "Bearer ") {
+			http.Error(w, "unauthorized", 401)
+			return
+		}
+		provided := strings.TrimPrefix(v, "Bearer ")
+		valid := subtle.ConstantTimeCompare([]byte(provided), []byte(c.Token)) == 1
+		if !valid && (r.Method == http.MethodGet || r.Method == http.MethodHead) && c.ReadToken != "" {
+			valid = subtle.ConstantTimeCompare([]byte(provided), []byte(c.ReadToken)) == 1
+		}
+		if !valid {
 			http.Error(w, "unauthorized", 401)
 			return
 		}
@@ -139,6 +214,10 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request) {
 	tail := strings.TrimPrefix(r.URL.Path, "/api/sessions/")
 	parts := strings.Split(strings.Trim(tail, "/"), "/")
 	id := parts[0]
+	if id == "" || strings.ContainsAny(id, "\\/") {
+		http.NotFound(w, r)
+		return
+	}
 	v, e := s.Store.Session(id)
 	if e != nil {
 		s.writeErr(w, e)
@@ -159,7 +238,86 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request) {
 		s.write(w, 200, map[string]any{"events": ev})
 		return
 	}
+	if len(parts) > 1 && parts[1] == "turns" {
+		if r.Method != http.MethodGet {
+			http.NotFound(w, r)
+			return
+		}
+		before, _ := strconv.ParseInt(r.URL.Query().Get("before"), 10, 64)
+		items, e := s.Store.Turns(id, before, queryLimit(r.URL.Query().Get("limit"), 100, 500))
+		if e != nil {
+			s.writeErr(w, e)
+			return
+		}
+		s.write(w, http.StatusOK, map[string]any{"turns": items})
+		return
+	}
+	if len(parts) > 1 && parts[1] == "attachments" {
+		if r.Method == http.MethodGet {
+			items, e := s.Store.Attachments(id, queryLimit(r.URL.Query().Get("limit"), 100, 500))
+			if e != nil {
+				s.writeErr(w, e)
+				return
+			}
+			s.write(w, http.StatusOK, map[string]any{"attachments": items})
+			return
+		}
+		if r.Method == http.MethodPost {
+			s.uploadAttachment(w, r, id)
+			return
+		}
+		http.NotFound(w, r)
+		return
+	}
+	if r.Method == http.MethodPatch {
+		var x struct {
+			Model string `json:"model"`
+			Mode  string `json:"mode"`
+			Title string `json:"title"`
+		}
+		if json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&x) != nil {
+			s.writeErr(w, errors.New("invalid body"))
+			return
+		}
+		if x.Mode != "readonly" && x.Mode != "ask" && x.Mode != "auto" && x.Mode != "full" {
+			s.writeErr(w, errors.New("invalid permission mode"))
+			return
+		}
+		if x.Mode == "full" && !s.Cfg.AllowFull {
+			s.writeErr(w, errors.New("full access is disabled"))
+			return
+		}
+		v, e = s.Store.UpdateSession(id, x.Model, x.Mode, x.Title)
+		if e != nil {
+			s.writeErr(w, e)
+			return
+		}
+		s.write(w, http.StatusOK, map[string]any{"session": v})
+		return
+	}
+	if r.Method == http.MethodDelete {
+		paths, e := s.Store.DeleteSession(id)
+		if e != nil {
+			s.writeErr(w, e)
+			return
+		}
+		for _, p := range paths {
+			_ = os.Remove(p)
+		}
+		s.write(w, http.StatusOK, map[string]any{"deleted": true, "id": id})
+		return
+	}
 	s.write(w, 200, map[string]any{"session": v})
+}
+func queryLimit(raw string, fallback, max int) int {
+	n, _ := strconv.Atoi(raw)
+	if n < 1 {
+		n = fallback
+	}
+	if n > max {
+		n = max
+	}
+	return n
 }
 func (s *Server) eventStream(w http.ResponseWriter, r *http.Request, sessionID string) {
 	f, ok := w.(http.Flusher)
@@ -231,7 +389,7 @@ func (s *Server) turn(w http.ResponseWriter, r *http.Request) {
 			http.NotFound(w, r)
 			return
 		}
-		if e := s.Store.CancelQueued(id); e != nil {
+		if e := s.Engine.Cancel(id); e != nil {
 			s.writeErr(w, e)
 			return
 		}
@@ -244,6 +402,220 @@ func (s *Server) turn(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.write(w, 200, map[string]any{"turn": t})
+}
+func (s *Server) uploadAttachment(w http.ResponseWriter, r *http.Request, sessionID string) {
+	const max = 16 << 20
+	r.Body = http.MaxBytesReader(w, r.Body, max+1<<20)
+	if e := r.ParseMultipartForm(max); e != nil {
+		s.writeErr(w, errors.New("invalid multipart attachment"))
+		return
+	}
+	f, header, e := r.FormFile("file")
+	if e != nil {
+		s.writeErr(w, errors.New("file field is required"))
+		return
+	}
+	defer f.Close()
+	name := filepath.Base(header.Filename)
+	name = safeFilename(name)
+	if name == "." || name == "" || name == string(filepath.Separator) {
+		s.writeErr(w, errors.New("invalid attachment name"))
+		return
+	}
+	if len(name) > 255 {
+		s.writeErr(w, errors.New("attachment name too long"))
+		return
+	}
+	id := store.ID()
+	dir := filepath.Join(s.Cfg.DataDir, "attachments", sessionID)
+	if e = os.MkdirAll(dir, 0700); e != nil {
+		s.writeErr(w, e)
+		return
+	}
+	tmp, e := os.CreateTemp(dir, ".upload-*")
+	if e != nil {
+		s.writeErr(w, e)
+		return
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+	n, e := io.CopyN(tmp, f, max+1)
+	if e != nil && e != io.EOF {
+		_ = tmp.Close()
+		s.writeErr(w, e)
+		return
+	}
+	if n > max {
+		_ = tmp.Close()
+		s.writeErr(w, errors.New("attachment exceeds 16 MiB"))
+		return
+	}
+	if e = tmp.Sync(); e == nil {
+		e = tmp.Close()
+	} else {
+		_ = tmp.Close()
+	}
+	if e != nil {
+		s.writeErr(w, e)
+		return
+	}
+	final := filepath.Join(dir, id+"-"+name)
+	if e = os.Rename(tmpName, final); e != nil {
+		s.writeErr(w, e)
+		return
+	}
+	v, e := s.Store.AddAttachment(store.Attachment{ID: id, SessionID: sessionID, Name: name, Path: final, Mime: header.Header.Get("Content-Type"), Size: n})
+	if e != nil {
+		_ = os.Remove(final)
+		s.writeErr(w, e)
+		return
+	}
+	s.write(w, http.StatusCreated, map[string]any{"attachment": v})
+}
+func (s *Server) attachment(w http.ResponseWriter, r *http.Request) {
+	id := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/attachments/"), "/")
+	if id == "" || strings.ContainsAny(id, "\\/") {
+		http.NotFound(w, r)
+		return
+	}
+	v, e := s.Store.Attachment(id)
+	if e != nil {
+		s.writeErr(w, e)
+		return
+	}
+	if r.Method == http.MethodDelete {
+		v, e = s.Store.DeleteAttachment(id)
+		if e != nil {
+			s.writeErr(w, e)
+			return
+		}
+		_ = os.Remove(v.Path)
+		s.write(w, http.StatusOK, map[string]any{"deleted": true, "id": id})
+		return
+	}
+	if r.Method != http.MethodGet {
+		http.NotFound(w, r)
+		return
+	}
+	f, e := os.Open(v.Path)
+	if e != nil {
+		s.writeErr(w, store.ErrNotFound)
+		return
+	}
+	defer f.Close()
+	if v.Mime != "" {
+		w.Header().Set("Content-Type", v.Mime)
+	}
+	w.Header().Set("Content-Disposition", `attachment; filename="`+strings.ReplaceAll(v.Name, `"`, `'`)+`"`)
+	http.ServeContent(w, r, v.Name, time.UnixMilli(v.Created), f)
+}
+func safeFilename(name string) string {
+	return strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return '-'
+		}
+		return r
+	}, name)
+}
+func (s *Server) schedules(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet {
+		items, e := s.Store.Schedules(r.URL.Query().Get("session_id"), queryLimit(r.URL.Query().Get("limit"), 100, 500))
+		if e != nil {
+			s.writeErr(w, e)
+			return
+		}
+		s.write(w, http.StatusOK, map[string]any{"schedules": items})
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.NotFound(w, r)
+		return
+	}
+	var v struct {
+		SessionID  string `json:"session_id"`
+		Prompt     string `json:"prompt"`
+		Expression string `json:"expression"`
+		NextAt     int64  `json:"next_at"`
+		Paused     bool   `json:"paused"`
+	}
+	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&v) != nil || v.SessionID == "" || strings.TrimSpace(v.Prompt) == "" {
+		s.writeErr(w, errors.New("session_id and prompt are required"))
+		return
+	}
+	if _, e := s.Store.Session(v.SessionID); e != nil {
+		s.writeErr(w, e)
+		return
+	}
+	if _, _, e := engine.ParseScheduleInterval(v.Expression); e != nil {
+		s.writeErr(w, e)
+		return
+	}
+	if v.NextAt == 0 {
+		v.NextAt = store.Now()
+	}
+	x, e := s.Store.CreateSchedule(store.Schedule{SessionID: v.SessionID, Prompt: v.Prompt, Expression: v.Expression, NextAt: v.NextAt, Paused: v.Paused})
+	if e != nil {
+		s.writeErr(w, e)
+		return
+	}
+	s.write(w, http.StatusCreated, map[string]any{"schedule": x})
+}
+func (s *Server) schedule(w http.ResponseWriter, r *http.Request) {
+	tail := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/schedules/"), "/")
+	parts := strings.Split(tail, "/")
+	id := parts[0]
+	if id == "" {
+		http.NotFound(w, r)
+		return
+	}
+	if len(parts) > 1 && parts[1] == "pause" && r.Method == http.MethodPost {
+		var v struct {
+			Paused bool `json:"paused"`
+		}
+		if json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&v) != nil {
+			s.writeErr(w, errors.New("invalid body"))
+			return
+		}
+		if e := s.Store.UpdateScheduleNext(id, store.Now(), v.Paused); e != nil {
+			s.writeErr(w, e)
+			return
+		}
+		s.write(w, http.StatusOK, map[string]any{"ok": true, "paused": v.Paused})
+		return
+	}
+	if r.Method == http.MethodDelete {
+		if e := s.Store.DeleteSchedule(id); e != nil {
+			s.writeErr(w, e)
+			return
+		}
+		s.write(w, http.StatusOK, map[string]any{"deleted": true, "id": id})
+		return
+	}
+	http.NotFound(w, r)
+}
+func (s *Server) providers(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.NotFound(w, r)
+		return
+	}
+	out := map[string]any{"codex": map[string]any{"runtime": "codex", "command": s.Cfg.CodexCommand, "enabled": true}, "claude": map[string]any{"runtime": "claude", "command": s.Cfg.ClaudeCommand, "enabled": true}}
+	for name, p := range s.Cfg.Providers {
+		out[name] = map[string]any{"runtime": p.Runtime, "models": p.Models, "enabled": p.Enabled}
+	}
+	s.write(w, http.StatusOK, map[string]any{"providers": out})
+}
+func (s *Server) models(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.NotFound(w, r)
+		return
+	}
+	out := map[string][]string{}
+	for name, p := range s.Cfg.Providers {
+		if p.Enabled {
+			out[name] = append([]string(nil), p.Models...)
+		}
+	}
+	s.write(w, http.StatusOK, map[string]any{"models": out})
 }
 func (s *Server) approval(w http.ResponseWriter, r *http.Request) {
 	id := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/api/approvals/"), "/")

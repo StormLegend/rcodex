@@ -108,3 +108,25 @@ The channel handlers enqueue work into durable sessions and the engine writes
 provider responses to the outbox. Before production cutover, run external
 acceptance tests with real bot credentials and finish relay peer
 enrollment/rotation, stream forwarding policy, and the embedded console.
+
+### Independent operation and maintenance
+
+The Go service is intentionally independent from the Node gateway. Use
+`cmd/rcg-ops` with `deploy/targets.example.json` to probe both health endpoints
+and explicitly select a healthy preferred endpoint. Selection never retries or
+replays a turn on the other service because the two SQLite databases are not a
+shared session store. `gateway-select.sh` is a small operator wrapper for the
+same safe action.
+
+The API includes session deletion and pagination, multipart attachments under
+the gateway data directory, durable `once` / `every:duration` schedules, model
+and provider inventory, and per-source rate limits. Schedules are persisted and
+enqueued by the engine; a busy session is not replayed.
+
+Run `cmd/rcg-admin backup` and `restore` for SQLite maintenance. Restore must be
+performed with the Go service stopped; the command validates the input and
+preserves a pre-restore backup. `rotate-token` atomically rewrites a literal
+token config and requires a service restart. Use `deploy/upgrade-macos.sh` or
+`upgrade-linux.sh` for versioned, health-gated upgrades and rollback. The
+`rcg-loadtest` command and `deploy/soak.sh` exercise the read-only sessions API;
+a short run is not evidence of a 24/72-hour soak.

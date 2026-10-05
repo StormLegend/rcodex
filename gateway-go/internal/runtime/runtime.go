@@ -3,6 +3,7 @@ package runtime
 import (
 	"bufio"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -42,14 +43,15 @@ type Session struct {
 	Mode    string
 }
 type adapter struct {
-	cmd     string
-	args    []string
-	mu      sync.Mutex
-	runMu   sync.Mutex
-	proc    *exec.Cmd
-	stdin   io.WriteCloser
-	next    int64
-	scanner *bufio.Scanner
+	cmd      string
+	args     []string
+	mu       sync.Mutex
+	runMu    sync.Mutex
+	proc     *exec.Cmd
+	procStop context.CancelFunc
+	stdin    io.WriteCloser
+	next     int64
+	scanner  *bufio.Scanner
 }
 
 func (a *adapter) send(v any) error {
@@ -108,19 +110,33 @@ func (a *adapter) startProcess(ctx context.Context, cwd string) (*bufio.Scanner,
 	if a.proc != nil {
 		return nil, nil
 	}
-	a.proc = exec.CommandContext(ctx, a.cmd, a.args...)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	procCtx, procStop := context.WithCancel(context.Background())
+	a.proc = exec.CommandContext(procCtx, a.cmd, a.args...)
+	a.procStop = procStop
 	a.proc.Dir = cwd
 	a.proc.Env = os.Environ()
 	in, e := a.proc.StdinPipe()
 	if e != nil {
+		procStop()
+		a.proc = nil
+		a.procStop = nil
 		return nil, e
 	}
 	out, e := a.proc.StdoutPipe()
 	if e != nil {
+		procStop()
+		a.proc = nil
+		a.procStop = nil
 		return nil, e
 	}
 	a.stdin = in
 	if e = a.proc.Start(); e != nil {
+		procStop()
+		a.proc = nil
+		a.procStop = nil
 		return nil, e
 	}
 	proc := a.proc
@@ -130,10 +146,12 @@ func (a *adapter) startProcess(ctx context.Context, cwd string) (*bufio.Scanner,
 		if a.proc == proc {
 			a.proc = nil
 			a.stdin = nil
+			a.procStop = nil
 		}
 		a.mu.Unlock()
 	}()
 	a.scanner = bufio.NewScanner(out)
+	a.scanner.Buffer(make([]byte, 64<<10), 16<<20)
 	return a.scanner, nil
 }
 func (a *adapter) Stop() error {
@@ -142,9 +160,13 @@ func (a *adapter) Stop() error {
 	if a.proc == nil {
 		return nil
 	}
+	if a.procStop != nil {
+		a.procStop()
+	}
 	e := a.proc.Process.Kill()
 	a.proc = nil
 	a.stdin = nil
+	a.procStop = nil
 	a.scanner = nil
 	return e
 }
@@ -211,6 +233,7 @@ func (a *Codex) Turn(ctx context.Context, s Session, prompt string, h Handler) (
 	for {
 		select {
 		case <-ctx.Done():
+			_ = a.Interrupt(context.Background(), s)
 			return "", ctx.Err()
 		default:
 		}
@@ -286,25 +309,67 @@ type Claude struct {
 	command string
 	mu      sync.Mutex
 	procs   map[string]*exec.Cmd
+	started map[string]bool
 }
 
 func NewClaude(command string) Runtime {
-	return &Claude{command: command, procs: map[string]*exec.Cmd{}}
+	return &Claude{command: command, procs: map[string]*exec.Cmd{}, started: map[string]bool{}}
 }
 func (a *Claude) Start(ctx context.Context, cwd, model, mode string, h Handler) (Session, error) {
-	return Session{Runtime: "claude", CWD: cwd, Model: model}, nil
+	if err := ctx.Err(); err != nil {
+		return Session{}, err
+	}
+	if cwd == "" {
+		return Session{}, errors.New("claude cwd required")
+	}
+	if _, err := os.Stat(cwd); err != nil {
+		return Session{}, err
+	}
+	id, err := claudeSessionID()
+	if err != nil {
+		return Session{}, err
+	}
+	a.mu.Lock()
+	a.started[id] = true
+	a.mu.Unlock()
+	return Session{ID: id, Runtime: "claude", CWD: cwd, Model: model, Mode: mode}, nil
 }
-func (a *Claude) Resume(ctx context.Context, s Session, h Handler) (Session, error) { return s, nil }
+func (a *Claude) Resume(ctx context.Context, s Session, h Handler) (Session, error) {
+	if s.ID == "" || s.CWD == "" {
+		return Session{}, errors.New("claude session id and cwd required")
+	}
+	if _, err := os.Stat(s.CWD); err != nil {
+		return Session{}, err
+	}
+	a.mu.Lock()
+	a.started[s.ID] = false
+	a.mu.Unlock()
+	return s, nil
+}
 func (a *Claude) Turn(ctx context.Context, s Session, prompt string, h Handler) (string, error) {
-	args := []string{"-p", "--output-format", "stream-json", "--input-format", "stream-json", "--verbose"}
-	if s.Model != "" {
-		args = append(args, "--model", s.Model)
+	if s.ID == "" {
+		return "", errors.New("claude session id required")
 	}
 	if strings.EqualFold(s.CWD, "") {
 		return "", errors.New("claude cwd required")
 	}
+	args := []string{"-p", "--output-format", "stream-json", "--input-format", "stream-json", "--verbose"}
+	a.mu.Lock()
+	isNew := a.started[s.ID]
+	if isNew {
+		args = append(args, "--session-id", s.ID)
+	} else {
+		args = append(args, "--resume", s.ID)
+	}
+	delete(a.started, s.ID)
+	a.mu.Unlock()
+	if s.Model != "" {
+		args = append(args, "--model", s.Model)
+	}
+	args = append(args, claudePermissionArgs(s.Mode)...)
 	cmd := exec.CommandContext(ctx, a.command, args...)
 	cmd.Dir = s.CWD
+	cmd.Stderr = io.Discard
 	in, e := cmd.StdinPipe()
 	if e != nil {
 		return "", e
@@ -316,6 +381,16 @@ func (a *Claude) Turn(ctx context.Context, s Session, prompt string, h Handler) 
 	if e = cmd.Start(); e != nil {
 		return "", e
 	}
+	a.mu.Lock()
+	a.procs[s.ID] = cmd
+	a.mu.Unlock()
+	defer func() {
+		a.mu.Lock()
+		if a.procs[s.ID] == cmd {
+			delete(a.procs, s.ID)
+		}
+		a.mu.Unlock()
+	}()
 	b, _ := json.Marshal(map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": prompt}})
 	_, e = in.Write(append(b, '\n'))
 	if e != nil {
@@ -324,6 +399,7 @@ func (a *Claude) Turn(ctx context.Context, s Session, prompt string, h Handler) 
 	_ = in.Close()
 	result := ""
 	sc := bufio.NewScanner(out)
+	sc.Buffer(make([]byte, 64<<10), 16<<20)
 	for sc.Scan() {
 		var v map[string]any
 		if json.Unmarshal(sc.Bytes(), &v) != nil {
@@ -349,5 +425,49 @@ func (a *Claude) Turn(ctx context.Context, s Session, prompt string, h Handler) 
 	}
 	return result, nil
 }
-func (a *Claude) Interrupt(ctx context.Context, s Session) error { return nil }
-func (a *Claude) Stop() error                                    { return nil }
+func (a *Claude) Interrupt(ctx context.Context, s Session) error { return a.interrupt(s) }
+func (a *Claude) Stop() error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	var first error
+	for id, p := range a.procs {
+		if err := p.Process.Kill(); err != nil && first == nil {
+			first = err
+		}
+		delete(a.procs, id)
+	}
+	return first
+}
+
+func (a *Claude) interrupt(s Session) error {
+	a.mu.Lock()
+	p := a.procs[s.ID]
+	a.mu.Unlock()
+	if p == nil {
+		return nil
+	}
+	return p.Process.Kill()
+}
+
+func claudeSessionID() (string, error) {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", err
+	}
+	b[6] = (b[6] & 0x0f) | 0x40
+	b[8] = (b[8] & 0x3f) | 0x80
+	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16]), nil
+}
+
+func claudePermissionArgs(mode string) []string {
+	switch mode {
+	case "readonly":
+		return []string{"--permission-mode", "plan"}
+	case "auto":
+		return []string{"--permission-mode", "acceptEdits"}
+	case "full":
+		return []string{"--permission-mode", "bypassPermissions", "--dangerously-skip-permissions"}
+	default:
+		return []string{"--permission-mode", "default"}
+	}
+}
