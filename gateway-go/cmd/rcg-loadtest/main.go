@@ -40,7 +40,7 @@ func (c *counters) add(d time.Duration, ok bool) {
 }
 func main() {
 	url := flag.String("url", "http://127.0.0.1:18890/api/sessions", "authenticated read-only endpoint")
-	token := flag.String("token", "", "bearer token")
+	token := flag.String("token", os.Getenv("RCG_ACCESS_TOKEN"), "bearer token (prefer RCG_ACCESS_TOKEN so it is not visible in process arguments)")
 	duration := flag.Duration("duration", time.Minute, "test duration")
 	concurrency := flag.Int("concurrency", 4, "workers")
 	pause := flag.Duration("pause", 100*time.Millisecond, "pause between requests per worker")
