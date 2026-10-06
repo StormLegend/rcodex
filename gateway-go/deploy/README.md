@@ -25,3 +25,8 @@ through the normal secret distribution channel.
 of a 24/72-hour soak; `soak-chain.sh` runs the 24-hour phase and then the
 72-hour phase with a zero-failure gate. Both logs must reach their final
 summaries before the soak is accepted.
+
+Pass the complete authenticated endpoint to `soak-chain.sh`, for example
+`http://127.0.0.1:18891/api/sessions`, not just the server origin. The script runs
+a two-second zero-failure preflight before starting the 24-hour phase. Keep any
+failed run's logs; a corrected run begins its own elapsed-time window.

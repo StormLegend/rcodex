@@ -79,9 +79,17 @@ run validation before publishing; tags containing a suffix publish as prerelease
   60233), and its authenticated sessions API returned 200. The pre-existing
   v0.2.9 instance on port 18890 retained PID 40441 and also returned healthy/200.
   The old Linux Node unit and its tunnel remained active.
-- Candidate 24h → 72h read-only soak started at **2026-10-06 14:10:42 UTC** under
-  `com.stormlegend.rcodex-go-candidate-soak` (supervisor PID 60235, chain 60237,
-  load generator 60239). State is in
+- The first candidate soak attempt at 14:10:42 UTC was incorrectly pointed at
+  `/`, which returned 404. All its reported requests failed. This was an
+  acceptance deployment configuration error, not passing soak evidence. The
+  round was stopped and retained as `soak-chain.failed-root-url.json` and the
+  `soak-v0.2.10-rc.1-failed-root-url/` log directory; it was not counted or erased.
+- After correcting the endpoint to `/api/sessions`, a 15-second probe passed
+  **60 requests, 0 failures, p95 bucket <=1ms**. `soak-chain.sh` now runs a
+  two-second zero-failure preflight; that also passed (8 requests, 0 failures).
+- The corrected candidate 24h → 72h read-only soak started at
+  **2026-10-06 14:38:01 UTC** under `com.stormlegend.rcodex-go-candidate-soak`
+  (supervisor PID 60677, chain 60678). State is in
   `~/Applications/rcodex-go-candidate/soak-chain.json`; logs are in
   `~/Library/Logs/rcodex-go-candidate/soak-v0.2.10-rc.1/`.
   The supervisor refuses to overwrite an existing run on reload/reboot. Check

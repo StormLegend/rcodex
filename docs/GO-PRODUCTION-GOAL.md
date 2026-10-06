@@ -107,6 +107,8 @@ be transferred to the new candidate. Public ingress deployment remains deferred.
 Release `v0.2.10-rc.1` and all five platform archives are published. Linux/macOS
 CI and release validation passed. Mac mini now runs an additional isolated
 launchd candidate on `127.0.0.1:18891`, with its own config/data/workspace and a
-separate 24h→72h soak started at 2026-10-06 14:10:42 UTC. The existing Go service
+separate 24h→72h soak started at 2026-10-06 14:38:01 UTC after a passing short
+probe. The first candidate soak's wrong endpoint returned 404; that failed round
+was archived, and a fail-fast preflight was added. The existing Go service
 on 18890, its v0.2.9 soak, and the old Linux Node service remain unchanged.
 See the report for labels, log locations and verification timestamps.
