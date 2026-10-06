@@ -1,5 +1,9 @@
 # 与本机闭源 rCodex Gateway 的能力对照
 
+本表记录 `gateway/` 下的 Node 实现，不代表 `gateway-go/` 的完成状态。
+Go 版以 [生产验收清单](GO-PRODUCTION-GOAL.md) 和
+[2026-10-06 验收报告](GO-ACCEPTANCE-2026-10-06.md) 为准。
+
 本表以本机 `@rcodex-lab/gateway@1.4.37` 的 README、路由和 app-server 调用行为为参照；不复制其实现代码。
 
 | 能力 | 自研网关当前状态 | 替代优先级 | 说明 |

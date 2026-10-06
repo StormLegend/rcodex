@@ -10,12 +10,15 @@ each gateway owns its sessions and data, and in-flight operations cannot move.
 2. [x] Independent endpoint health probes and controlled selection with saved
    state, unhealthy-target rejection, failure/recovery thresholds, tests and a
    rollback procedure. Never replay mutating requests on another gateway.
-3. [x] Claude session identity persisted across turns/restarts, explicit resume,
+3. [partial] Claude session identity persisted across turns/restarts, explicit resume,
    cancellation/timeout that reaps processes, stream/error handling, permission
-   semantics and runtime/engine integration tests.
-4. [x] Session deletion, attachments, paginated history, persistent schedules,
+   semantics and runtime/engine integration tests. Local protocol/subprocess
+   coverage passes; authenticated Claude and real tool permissions remain open.
+4. [partial] Session deletion, attachments, paginated history, persistent schedules,
    runtime model/provider configuration APIs. Validate authorization, path
    confinement, restart behavior and compatibility with existing SQLite data.
+   Current provider/model endpoints expose configured inventory; they do not
+   implement persistent provider management or provider selection for execution.
 5. [partial] Telegram, Discord, Feishu: local signed ingress -> queue -> runtime ->
    durable outbound tests, then real dedicated bot acceptance. Real credentials
    and permitted test destinations requested; never take over an old bot's
@@ -92,3 +95,11 @@ each gateway owns its sessions and data, and in-flight operations cannot move.
   change. A new environment-token chained soak is now running as v0.2.9 PID
   40470 with separate logs under
   `Library/Logs/rcodex-go-soak-chain-v0.2.9`.
+
+## 2026-10-06 acceptance continuation
+
+The earlier completed markers for items 3 and 4 overstated the evidence and have
+been corrected. See [the acceptance report](GO-ACCEPTANCE-2026-10-06.md) for the
+regressions, tests, real Codex restart result, and remaining production gates.
+The v0.2.9 soak remains a baseline for that exact binary; its elapsed time cannot
+be transferred to the new candidate. Public ingress deployment remains deferred.

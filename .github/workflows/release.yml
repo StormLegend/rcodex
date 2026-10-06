@@ -15,6 +15,11 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: gateway-go/go.mod
+      - name: Validate release
+        working-directory: gateway-go
+        run: |
+          go test -race ./...
+          go vet ./...
       - name: Build release matrix
         working-directory: gateway-go
         env:
@@ -44,4 +49,5 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
           files: gateway-go/dist/*
