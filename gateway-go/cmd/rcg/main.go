@@ -32,10 +32,6 @@ func main() {
 		os.Exit(2)
 	}
 	defer s.DB.Close()
-	if e = s.Recover(); e != nil {
-		fmt.Fprintln(os.Stderr, "recovery:", e)
-		os.Exit(2)
-	}
 	if *doctor {
 		if e = s.Check(); e != nil {
 			fmt.Fprintln(os.Stderr, e)
@@ -51,6 +47,12 @@ func main() {
 		}
 		fmt.Println(*backup)
 		return
+	}
+	// Only a serving process owns recovery. Maintenance may inspect or back up
+	// the database of a live gateway without cancelling its active work.
+	if e = s.Recover(); e != nil {
+		fmt.Fprintln(os.Stderr, "recovery:", e)
+		os.Exit(2)
 	}
 	log := slog.New(slog.NewJSONHandler(os.Stderr, nil))
 	eng := engine.New(s, c, log)
