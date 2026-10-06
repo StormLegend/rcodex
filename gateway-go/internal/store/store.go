@@ -552,8 +552,15 @@ func (s *Store) NewApproval(t Turn, request any) (Approval, error) {
 	return v, e
 }
 func (s *Store) Approval(id string) (Approval, error) {
+	return scanApproval(s.DB.QueryRow(`SELECT * FROM approvals WHERE id=?`, id))
+}
+func scanApproval(row interface{ Scan(...any) error }) (Approval, error) {
 	var v Approval
-	e := s.DB.QueryRow(`SELECT * FROM approvals WHERE id=?`, id).Scan(&v.ID, &v.SessionID, &v.TurnID, &v.Request, &v.Response, &v.State, &v.Created)
+	// Pending approvals have SQL NULL responses. Scan into []byte first:
+	// database/sql cannot assign NULL directly to the json.RawMessage alias.
+	var response []byte
+	e := row.Scan(&v.ID, &v.SessionID, &v.TurnID, &v.Request, &response, &v.State, &v.Created)
+	v.Response = json.RawMessage(response)
 	return v, e
 }
 func (s *Store) Approvals(state string, limit int) ([]Approval, error) {
@@ -573,8 +580,8 @@ func (s *Store) Approvals(state string, limit int) ([]Approval, error) {
 	defer rows.Close()
 	out := []Approval{}
 	for rows.Next() {
-		var v Approval
-		if e = rows.Scan(&v.ID, &v.SessionID, &v.TurnID, &v.Request, &v.Response, &v.State, &v.Created); e != nil {
+		v, e := scanApproval(rows)
+		if e != nil {
 			return nil, e
 		}
 		out = append(out, v)
@@ -759,6 +766,10 @@ func (s *Store) Stats() map[string]int64 {
 		if e := s.DB.QueryRow(`SELECT count(*) FROM ` + table).Scan(&n); e == nil {
 			out[table] = n
 		}
+	}
+	var queued, sent, dead int64
+	if err := s.DB.QueryRow(`SELECT count(CASE WHEN state='queued' THEN 1 END), count(CASE WHEN state='sent' THEN 1 END), count(CASE WHEN state='dead' THEN 1 END) FROM outbox`).Scan(&queued, &sent, &dead); err == nil {
+		out["outbox_queued"], out["outbox_sent"], out["outbox_dead"] = queued, sent, dead
 	}
 	return out
 }

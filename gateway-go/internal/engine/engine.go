@@ -87,15 +87,17 @@ func (e *Engine) run(parent context.Context, t store.Turn) {
 				err = er
 			} else {
 				if rs.ID != "" {
-					_ = e.Store.Native(s.ID, rs.ID)
+					err = e.Store.Native(s.ID, rs.ID)
 				}
-				result, err = rt.Turn(ctx, rs, t.Prompt, func(ev runtime.Event) error {
-					_, err := e.Store.Event(t.SessionID, t.ID, ev.Method, ev.Params)
-					if err != nil {
-						return err
-					}
-					return e.handleEvent(ctx, t, s, ev)
-				})
+				if err == nil {
+					result, err = rt.Turn(ctx, rs, t.Prompt, func(ev runtime.Event) error {
+						_, err := e.Store.Event(t.SessionID, t.ID, ev.Method, ev.Params)
+						if err != nil {
+							return err
+						}
+						return e.handleEvent(ctx, t, s, ev)
+					})
+				}
 			}
 		}
 	}
@@ -145,6 +147,9 @@ func (e *Engine) handleEvent(ctx context.Context, t store.Turn, s store.Session,
 		return err
 	}
 	if !question && (s.Mode == "auto" || s.Mode == "full") {
+		if err = e.Store.Resolve(a.ID, map[string]any{"approved": true, "reason": "session permission mode"}); err != nil {
+			return err
+		}
 		return ev.Respond(map[string]string{"decision": "accept"})
 	}
 	for {
