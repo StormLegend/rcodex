@@ -9,8 +9,10 @@ previous symlink on failure.
 
 Pass the expected SHA256 as the fourth argument (or set
 `RCG_EXPECTED_SHA256`) so the script rejects a tampered binary before creating
-the release directory. The published GitHub `SHA256SUMS` file is the source for
-that value.
+the release directory. The published GitHub `SHA256SUMS` contains **archive**
+hashes: first verify the downloaded archive against that manifest, then extract
+it and calculate the `rcg` executable's SHA256 for the upgrade argument. The
+archive and executable hashes are different values.
 
 Run `rcg-admin backup` before upgrades and keep the generated SQLite backup
 outside the active data directory. Run `rcg-admin restore` only while the Go

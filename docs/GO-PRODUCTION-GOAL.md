@@ -103,3 +103,10 @@ been corrected. See [the acceptance report](GO-ACCEPTANCE-2026-10-06.md) for the
 regressions, tests, real Codex restart result, and remaining production gates.
 The v0.2.9 soak remains a baseline for that exact binary; its elapsed time cannot
 be transferred to the new candidate. Public ingress deployment remains deferred.
+
+Release `v0.2.10-rc.1` and all five platform archives are published. Linux/macOS
+CI and release validation passed. Mac mini now runs an additional isolated
+launchd candidate on `127.0.0.1:18891`, with its own config/data/workspace and a
+separate 24h→72h soak started at 2026-10-06 14:10:42 UTC. The existing Go service
+on 18890, its v0.2.9 soak, and the old Linux Node service remain unchanged.
+See the report for labels, log locations and verification timestamps.
