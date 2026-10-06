@@ -21,7 +21,11 @@ import (
 
 func testServer(t *testing.T) (*Server, string) {
 	t.Helper()
-	root := t.TempDir()
+	// Match config.Load's canonical roots (macOS /var is a symlink).
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	dbdir := t.TempDir()
 	s, err := store.Open(filepath.Join(dbdir, "gateway.db"))
 	if err != nil {

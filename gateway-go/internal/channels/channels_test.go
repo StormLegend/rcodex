@@ -1,13 +1,9 @@
 package channels
 
 import (
-	"bytes"
 	"context"
-	"crypto/aes"
-	"crypto/cipher"
 	"crypto/ed25519"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
@@ -63,22 +59,60 @@ func TestFeishuChallenge(t *testing.T) {
 	}
 }
 
+// This vector was generated independently with OpenSSL AES-256-CBC / PKCS#7,
+// SHA256("encrypt-key") and IV 000102030405060708090a0b0c0d0e0f. Feishu's
+// official SDK serializes base64(IV || ciphertext), not a key-derived IV.
+const feishuEventVector = "AAECAwQFBgcICQoLDA0ODz9Lxj77uokvUqazLE8ih8IIPoJ0qU041Slle81CkvPIRtvPcVFU0+HfpPUQWyg6EidZp+t/H03wXxvnzAs664wPRYE2fqSeNnOgQz2C8vbaFsxBTjdtg2kwNyKHMe9jHrok4Mhadu5/Ekthl3PiHtNwy3XjRPIZubMhKgTb6yc51r9QoPnV511sjT5qCp7bhUQLicizdRXTbbXqW/L0Zq9AL6AzMe8Su/biogVNLcK6pNpRjLzeYgbzBsh1UhtjT+op+SnIbVL8yoWyHYx1pFEWAaCillduTobNd+8Q0F41"
+
+func feishuRequest(body, key string) *http.Request {
+	r := httptest.NewRequest("POST", "/", strings.NewReader(body))
+	ts, nonce := strconv.FormatInt(time.Now().Unix(), 10), "fixture-nonce"
+	sum := sha256.Sum256([]byte(ts + nonce + key + body))
+	r.Header.Set("X-Lark-Request-Timestamp", ts)
+	r.Header.Set("X-Lark-Request-Nonce", nonce)
+	r.Header.Set("X-Lark-Signature", hex.EncodeToString(sum[:]))
+	return r
+}
+
 func TestFeishuEncryptedEvent(t *testing.T) {
-	key := "encrypt-key"
-	plain := `{"event":{"message":{"chat_id":"c1","content":"hello"},"sender":{"sender_id":{"open_id":"u1"}}},"header":{"event_id":"e1"}}`
-	hash := sha256.Sum256([]byte(key))
-	block, _ := aes.NewCipher(hash[:])
-	pad := block.BlockSize() - len(plain)%block.BlockSize()
-	p := append([]byte(plain), bytes.Repeat([]byte{byte(pad)}, pad)...)
-	out := make([]byte, len(p))
-	cipher.NewCBCEncrypter(block, hash[:block.BlockSize()]).CryptBlocks(out, p)
-	c := config.Channel{Secret: "", EncryptKey: key, Users: []string{"u1"}, Chats: []string{"c1"}}
-	var got Message
-	r := httptest.NewRequest("POST", "/", strings.NewReader(`{"encrypt":"`+base64.StdEncoding.EncodeToString(out)+`"}`))
-	w := httptest.NewRecorder()
-	Feishu(func(_ context.Context, m Message) error { got = m; return nil }, c).ServeHTTP(w, r)
-	if w.Code != 204 || got.Text != "hello" {
-		t.Fatalf("code=%d got=%+v body=%s", w.Code, got, w.Body.String())
+	c := config.Channel{Secret: "verify", EncryptKey: "encrypt-key", Users: []string{"u1"}, Chats: []string{"c1"}}
+	body := `{"encrypt":"` + feishuEventVector + `"}`
+	for _, scenario := range []string{"valid", "missing signature", "bad signature", "stale", "wrong token", "plaintext"} {
+		t.Run(scenario, func(t *testing.T) {
+			var got Message
+			cfg := c
+			r := feishuRequest(body, c.EncryptKey)
+			want := http.StatusUnauthorized
+			switch scenario {
+			case "valid":
+				want = http.StatusNoContent
+			case "missing signature":
+				r.Header.Del("X-Lark-Signature")
+			case "bad signature":
+				r.Header.Set("X-Lark-Signature", strings.Repeat("0", 64))
+			case "stale":
+				ts := strconv.FormatInt(time.Now().Add(-10*time.Minute).Unix(), 10)
+				r.Header.Set("X-Lark-Request-Timestamp", ts)
+				sum := sha256.Sum256([]byte(ts + "fixture-nonce" + c.EncryptKey + body))
+				r.Header.Set("X-Lark-Signature", hex.EncodeToString(sum[:]))
+			case "wrong token":
+				cfg.Secret = "different"
+			case "plaintext":
+				r = feishuRequest(`{"event":{"message":{"chat_id":"c1","message_type":"text","content":"{\"text\":\"hello\"}"},"sender":{"sender_id":{"open_id":"u1"}}},"header":{"event_id":"e1","event_type":"im.message.receive_v1","token":"verify"}}`, c.EncryptKey)
+			}
+			w := httptest.NewRecorder()
+			Feishu(func(_ context.Context, m Message) error { got = m; return nil }, cfg).ServeHTTP(w, r)
+			if w.Code != want {
+				t.Fatalf("status=%d want=%d body=%s", w.Code, want, w.Body)
+			}
+			if scenario == "valid" {
+				if got.Text != "hello" || got.ID != "e1" {
+					t.Fatalf("message=%+v", got)
+				}
+			} else if got.ID != "" {
+				t.Fatalf("unauthorized event dispatched: %+v", got)
+			}
+		})
 	}
 }
 
@@ -88,7 +122,11 @@ func TestDurableDeliveryProviderProtocolsWithLocalBase(t *testing.T) {
 		paths = append(paths, r.URL.Path)
 		if strings.HasSuffix(r.URL.Path, "tenant_access_token/internal") {
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"tenant_access_token":"tenant-test"}`))
+			_, _ = w.Write([]byte(`{"code":0,"tenant_access_token":"tenant-test"}`))
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/bot") {
+			_, _ = w.Write([]byte(`{"ok":true}`))
 			return
 		}
 		w.WriteHeader(http.StatusOK)

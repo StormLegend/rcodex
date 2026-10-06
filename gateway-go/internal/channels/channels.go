@@ -6,7 +6,6 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/ed25519"
-	"crypto/hmac"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
@@ -35,11 +34,11 @@ func Telegram(h Handler, c config.Channel) http.Handler {
 			http.Error(w, "method", 405)
 			return
 		}
-		if subtle.ConstantTimeCompare([]byte(r.Header.Get("X-Telegram-Bot-Api-Secret-Token")), []byte(c.Secret)) != 1 {
+		if !config.Equal(r.Header.Get("X-Telegram-Bot-Api-Secret-Token"), c.Secret) {
 			http.Error(w, "unauthorized", 401)
 			return
 		}
-		b, e := io.ReadAll(io.LimitReader(r.Body, 2<<20))
+		b, e := io.ReadAll(http.MaxBytesReader(w, r.Body, 2<<20))
 		if e != nil {
 			http.Error(w, "body", 400)
 			return
@@ -58,6 +57,10 @@ func Telegram(h Handler, c config.Channel) http.Handler {
 		}
 		if json.Unmarshal(b, &v) != nil {
 			http.Error(w, "json", 400)
+			return
+		}
+		if strings.TrimSpace(v.Message.Text) == "" {
+			w.WriteHeader(http.StatusNoContent)
 			return
 		}
 		if !allowed(strconv.FormatInt(v.Message.Chat.ID, 10), c.Chats) || !allowed(strconv.FormatInt(v.Message.From.ID, 10), c.Users) {
@@ -82,11 +85,13 @@ func decryptFeishu(encoded, encryptKey string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(data) == 0 || len(data)%block.BlockSize() != 0 {
+	if len(data) < 2*block.BlockSize() || len(data)%block.BlockSize() != 0 {
 		return nil, errors.New("invalid encrypted payload")
 	}
-	plain := make([]byte, len(data))
-	cipher.NewCBCDecrypter(block, keyHash[:block.BlockSize()]).CryptBlocks(plain, data)
+	// Feishu prefixes the ciphertext with a fresh IV; the IV is not the key.
+	iv, encrypted := data[:block.BlockSize()], data[block.BlockSize():]
+	plain := make([]byte, len(encrypted))
+	cipher.NewCBCDecrypter(block, iv).CryptBlocks(plain, encrypted)
 	if len(plain) == 0 {
 		return nil, errors.New("empty encrypted payload")
 	}
@@ -103,7 +108,11 @@ func decryptFeishu(encoded, encryptKey string) ([]byte, error) {
 }
 func Discord(h Handler, c config.Channel) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		b, e := io.ReadAll(io.LimitReader(r.Body, 2<<20))
+		if r.Method != http.MethodPost {
+			http.Error(w, "method", http.StatusMethodNotAllowed)
+			return
+		}
+		b, e := io.ReadAll(http.MaxBytesReader(w, r.Body, 2<<20))
 		if e != nil {
 			http.Error(w, "body", 400)
 			return
@@ -121,8 +130,11 @@ func Discord(h Handler, c config.Channel) http.Handler {
 			return
 		}
 		var v struct {
-			Type   int    `json:"type"`
-			ID     string `json:"id"`
+			Type int    `json:"type"`
+			ID   string `json:"id"`
+			User struct {
+				ID string `json:"id"`
+			} `json:"user"`
 			Member struct {
 				User struct {
 					ID string `json:"id"`
@@ -146,11 +158,19 @@ func Discord(h Handler, c config.Channel) http.Handler {
 			io.WriteString(w, `{"type":1}`)
 			return
 		}
-		if !allowed(v.ChannelID, c.Chats) || !allowed(v.Member.User.ID, c.Users) {
+		if v.Type != 2 || v.ID == "" || v.Token == "" {
+			http.Error(w, "unsupported interaction", http.StatusBadRequest)
+			return
+		}
+		user := v.Member.User.ID
+		if user == "" {
+			user = v.User.ID
+		}
+		if !allowed(v.ChannelID, c.Chats) || !allowed(user, c.Users) {
 			http.Error(w, "forbidden", 403)
 			return
 		}
-		if e := h(r.Context(), Message{"discord", v.ChannelID, v.Member.User.ID, v.Data.Name + " " + options(v.Data.Options), v.ID, v.Token}); e != nil {
+		if e := h(r.Context(), Message{"discord", v.ChannelID, user, v.Data.Name + " " + options(v.Data.Options), v.ID, v.Token}); e != nil {
 			http.Error(w, "failed", 500)
 			return
 		}
@@ -169,7 +189,11 @@ func options(v []struct {
 }
 func Feishu(h Handler, c config.Channel) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		b, e := io.ReadAll(io.LimitReader(r.Body, 2<<20))
+		if r.Method != http.MethodPost {
+			http.Error(w, "method", http.StatusMethodNotAllowed)
+			return
+		}
+		b, e := io.ReadAll(http.MaxBytesReader(w, r.Body, 2<<20))
 		if e != nil {
 			http.Error(w, "body", 400)
 			return
@@ -177,7 +201,20 @@ func Feishu(h Handler, c config.Channel) http.Handler {
 		var envelope struct {
 			Encrypt string `json:"encrypt"`
 		}
-		if json.Unmarshal(b, &envelope) == nil && envelope.Encrypt != "" {
+		raw := b
+		if json.Unmarshal(b, &envelope) != nil {
+			http.Error(w, "json", http.StatusBadRequest)
+			return
+		}
+		if c.EncryptKey != "" && envelope.Encrypt == "" {
+			http.Error(w, "encrypted payload required", http.StatusUnauthorized)
+			return
+		}
+		if envelope.Encrypt != "" {
+			if c.EncryptKey == "" {
+				http.Error(w, "encryption not configured", http.StatusUnauthorized)
+				return
+			}
 			b, e = decryptFeishu(envelope.Encrypt, c.EncryptKey)
 			if e != nil {
 				http.Error(w, "decrypt", 400)
@@ -188,7 +225,9 @@ func Feishu(h Handler, c config.Channel) http.Handler {
 			Challenge string `json:"challenge"`
 			Token     string `json:"token"`
 			Header    struct {
-				EventID string `json:"event_id"`
+				EventID   string `json:"event_id"`
+				Token     string `json:"token"`
+				EventType string `json:"event_type"`
 			} `json:"header"`
 			Event struct {
 				Sender struct {
@@ -197,8 +236,9 @@ func Feishu(h Handler, c config.Channel) http.Handler {
 					} `json:"sender_id"`
 				} `json:"sender"`
 				Message struct {
-					ChatID  string `json:"chat_id"`
-					Content string `json:"content"`
+					ChatID      string `json:"chat_id"`
+					Content     string `json:"content"`
+					MessageType string `json:"message_type"`
 				} `json:"message"`
 			} `json:"event"`
 		}
@@ -207,7 +247,7 @@ func Feishu(h Handler, c config.Channel) http.Handler {
 			return
 		}
 		if v.Challenge != "" {
-			if !hmac.Equal([]byte(v.Token), []byte(c.Secret)) {
+			if !config.Equal(v.Token, c.Secret) {
 				http.Error(w, "unauthorized", 401)
 				return
 			}
@@ -215,11 +255,36 @@ func Feishu(h Handler, c config.Channel) http.Handler {
 			json.NewEncoder(w).Encode(map[string]string{"challenge": v.Challenge})
 			return
 		}
+		if !config.Equal(v.Header.Token, c.Secret) {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		if c.EncryptKey != "" {
+			ts, nonce := r.Header.Get("X-Lark-Request-Timestamp"), r.Header.Get("X-Lark-Request-Nonce")
+			stamp, err := strconv.ParseInt(ts, 10, 64)
+			want := sha256.Sum256(append([]byte(ts+nonce+c.EncryptKey), raw...))
+			got, errSig := hex.DecodeString(r.Header.Get("X-Lark-Signature"))
+			if err != nil || abs(time.Now().Unix()-stamp) > 300 || nonce == "" || errSig != nil || subtle.ConstantTimeCompare(got, want[:]) != 1 {
+				http.Error(w, "invalid signature", http.StatusUnauthorized)
+				return
+			}
+		}
+		if v.Header.EventType != "im.message.receive_v1" || v.Event.Message.MessageType != "text" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		var content struct {
+			Text string `json:"text"`
+		}
+		if v.Header.EventID == "" || json.Unmarshal([]byte(v.Event.Message.Content), &content) != nil || strings.TrimSpace(content.Text) == "" {
+			http.Error(w, "invalid message", http.StatusBadRequest)
+			return
+		}
 		if !allowed(v.Event.Message.ChatID, c.Chats) || !allowed(v.Event.Sender.SenderID.OpenID, c.Users) {
 			http.Error(w, "forbidden", 403)
 			return
 		}
-		if e := h(r.Context(), Message{"feishu", v.Event.Message.ChatID, v.Event.Sender.SenderID.OpenID, v.Event.Message.Content, v.Header.EventID, ""}); e != nil {
+		if e := h(r.Context(), Message{"feishu", v.Event.Message.ChatID, v.Event.Sender.SenderID.OpenID, content.Text, v.Header.EventID, ""}); e != nil {
 			http.Error(w, "failed", 500)
 			return
 		}
@@ -227,6 +292,9 @@ func Feishu(h Handler, c config.Channel) http.Handler {
 	})
 }
 func allowed(v string, list []string) bool {
+	if v == "" {
+		return false
+	}
 	for _, x := range list {
 		if x == "*" || subtle.ConstantTimeCompare([]byte(v), []byte(x)) == 1 {
 			return true
@@ -245,9 +313,6 @@ func Signature(secret, body string) string {
 	h := sha256.Sum256([]byte(secret + body))
 	return hex.EncodeToString(h[:])
 }
-
-var _ = bytes.NewBuffer
-var _ = time.Now
 
 // Deliver sends one durable outbox item. It deliberately uses the provider's
 // HTTPS APIs directly so delivery does not depend on a second gateway process.
@@ -279,7 +344,7 @@ func DeliverWithClient(ctx context.Context, d store.Delivery, c config.Config, c
 			base = "https://discord.com"
 		}
 		endpoint = base + "/api/v10/webhooks/" + ch.AppID + "/" + d.Destination.Token
-		body, _ = json.Marshal(map[string]any{"content": d.Text})
+		body, _ = json.Marshal(map[string]any{"content": d.Text, "allowed_mentions": map[string]any{"parse": []string{}}})
 	case "feishu":
 		if base == "" {
 			base = "https://open.feishu.cn"
@@ -291,54 +356,74 @@ func DeliverWithClient(ctx context.Context, d store.Delivery, c config.Config, c
 		endpoint = base + "/open-apis/im/v1/messages?receive_id_type=chat_id"
 		content, _ := json.Marshal(map[string]string{"text": d.Text})
 		body, _ = json.Marshal(map[string]any{"receive_id": d.Destination.Chat, "msg_type": "text", "content": string(content)})
-		return postJSON(ctx, client, endpoint, body, map[string]string{"Authorization": "Bearer " + token})
+		return postJSON(ctx, client, endpoint, body, map[string]string{"Authorization": "Bearer " + token}, "feishu")
 	default:
 		return errors.New("unsupported delivery channel")
 	}
-	return postJSON(ctx, client, endpoint, body, nil)
+	return postJSON(ctx, client, endpoint, body, nil, d.Destination.Channel)
 }
 
 func feishuToken(ctx context.Context, client *http.Client, ch config.Channel, base string) (string, error) {
 	body, _ := json.Marshal(map[string]string{"app_id": ch.AppID, "app_secret": ch.AppSecret})
 	var out struct {
 		TenantAccessToken string `json:"tenant_access_token"`
-		Code              int    `json:"code"`
-		Msg               string `json:"msg"`
+		Code              *int   `json:"code"`
 	}
 	if err := postDecode(ctx, client, base+"/open-apis/auth/v3/tenant_access_token/internal", body, nil, &out); err != nil {
 		return "", err
 	}
-	if out.TenantAccessToken == "" {
-		return "", fmt.Errorf("feishu token failed: %s", out.Msg)
+	if out.Code == nil || *out.Code != 0 || out.TenantAccessToken == "" {
+		return "", errors.New("feishu token request rejected")
 	}
 	return out.TenantAccessToken, nil
 }
 
-func postJSON(ctx context.Context, client *http.Client, endpoint string, body []byte, headers map[string]string) error {
-	return postDecode(ctx, client, endpoint, body, headers, &struct{}{})
+func postJSON(ctx context.Context, client *http.Client, endpoint string, body []byte, headers map[string]string, provider string) error {
+	// Discord uses the HTTP status; Telegram and Feishu also report failures
+	// inside HTTP 200 responses. Never acknowledge those as delivered.
+	if provider == "discord" {
+		return postDecode(ctx, client, endpoint, body, headers, nil)
+	}
+	var result struct {
+		OK   *bool `json:"ok"`
+		Code *int  `json:"code"`
+	}
+	if err := postDecode(ctx, client, endpoint, body, headers, &result); err != nil {
+		return err
+	}
+	if provider == "telegram" && (result.OK == nil || !*result.OK) || provider == "feishu" && (result.Code == nil || *result.Code != 0) {
+		return fmt.Errorf("%s rejected delivery", provider)
+	}
+	return nil
 }
 
 func postDecode(ctx context.Context, client *http.Client, endpoint string, body []byte, headers map[string]string, out any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
-		return err
+		return errors.New("invalid provider endpoint")
 	}
 	req.Header.Set("Content-Type", "application/json")
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
-	resp, err := client.Do(req)
+	// Credential-bearing URLs and headers must not follow provider redirects.
+	bounded := *client
+	bounded.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	resp, err := bounded.Do(req)
 	if err != nil {
-		return err
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return errors.New("provider request failed")
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("provider returned %s: %s", resp.Status, strings.TrimSpace(string(b)))
+		return fmt.Errorf("provider returned HTTP %d", resp.StatusCode)
 	}
-	if out != nil && resp.ContentLength != 0 {
-		if err := json.NewDecoder(resp.Body).Decode(out); err != nil && err != io.EOF {
-			return err
+	if out != nil {
+		b, err := io.ReadAll(io.LimitReader(resp.Body, (1<<20)+1))
+		if err != nil || len(b) > 1<<20 || json.Unmarshal(b, out) != nil {
+			return errors.New("invalid provider response")
 		}
 	}
 	return nil
