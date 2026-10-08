@@ -75,3 +75,32 @@ origin; it passes the token-bearing URL to macOS through stdin, not process argv
 This validates the requested tunnel and console change. The earlier production
 gates for authenticated Claude, dedicated real bots, provider management and
 attachment execution remain open; this change does not claim full parity.
+
+## Published version and final deployment
+
+Source commit: `2987334dfca643257c1ad143c13643b7585cd4ae`.
+[Linux/macOS/browser CI](https://github.com/StormLegend/rcodex/actions/runs/37749325285)
+and [release validation/build](https://github.com/StormLegend/rcodex/actions/runs/37749602066)
+passed. [v0.2.11-rc.1](https://github.com/StormLegend/rcodex/releases/tag/v0.2.11-rc.1)
+is published with five platform archives and SHA256SUMS.
+
+The published Darwin ARM64 archive was verified against both its manifest and
+GitHub asset digest:
+`2e47b62cdf3614db213e56c3d231dfbe159dd1ae276a5d1827cc4eb121231e5a`.
+The serving binary's SHA256 is
+`f785f980b0531fd991eb804bad83a171b1b876b20944354f09962c1e2a01d374`.
+It is installed in `~/Applications/rcodex-go-preview/releases/v0.2.11-rc.1-github`.
+Before switching, the preview had no queued/running turns and its database was
+backed up to `backups/pre-v0.2.11-rc.1-github.db`.
+
+Final checks on the published artifact confirmed public root 200 with Cloudflare
+response headers, unauthenticated API 401, authenticated history retained after
+restart, SSE replay through the tunnel, and light/dark/mobile rendering with no
+browser script errors. The existing Mac services remained PID 40441 and 60233;
+the independent preview became PID 88576, and its Cloudflare connector stayed
+PID 87917 with a passing readiness response. Both old Linux user services stayed
+active. A native Mac Chrome screenshot was also inspected.
+
+Receipts and screenshots are in `~/Applications/rcodex-go-preview/acceptance/`.
+Temporary provisioning credentials were removed from the Linux test workspace;
+only the intended scoped connector credential remains in the Mac service config.

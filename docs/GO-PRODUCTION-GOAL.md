@@ -140,3 +140,8 @@ macOS-inspired console adds modal setup, a compact sidebar, light/dark appearanc
 conversation search and safe Markdown/code copying. A real authenticated Codex
 turn and SSE/history checks passed through the public HTTPS hostname. See
 [the deployment and acceptance record](GO-UI-TUNNEL-2026-10-08.md).
+
+`v0.2.11-rc.1` is published from `2987334`; all CI and release checks passed.
+Mac preview now uses the verified GitHub package. Public HTTPS root/auth/history,
+SSE replay and responsive appearance checks passed on the published artifact.
+The existing Mac/Linux services remain running independently.
