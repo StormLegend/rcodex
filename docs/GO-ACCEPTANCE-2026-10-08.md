@@ -80,3 +80,26 @@ management and execution selection; attachment-to-runtime wiring; completion and
 review of multi-day soak evidence. These remain open from the production goal.
 Public Relay/Cloudflare deployment remains explicitly deferred. This is a usable
 independent Mac verification instance, not a declaration of full production parity.
+
+## Published artifact verification
+
+Source commit: `6ff0d69a91ef13d5788c6a9394532c7ee4d342bd`.
+[Linux/macOS/browser CI](https://github.com/StormLegend/rcodex/actions/runs/37739628824)
+and [release validation/build](https://github.com/StormLegend/rcodex/actions/runs/37739834632)
+completed successfully. [v0.2.10-rc.3](https://github.com/StormLegend/rcodex/releases/tag/v0.2.10-rc.3)
+is published as a prerelease with five platform archives and `SHA256SUMS`.
+
+The Mac downloaded the published Darwin ARM64 archive and matched both its
+manifest entry and GitHub's asset digest:
+`51c025c0dbb7061bd4f8849e097d5243ee6672826fece094fb85bee5227d5798`.
+The archive contains all six commands. The serving `rcg` binary SHA256 is
+`7576d572c11347913b2e262f6704f8bc828341e8fdd86d6bf09cfe6d6726b5d0`.
+
+After confirming there were no queued/running preview turns, the database was
+backed up to `~/Applications/rcodex-go-preview/backups/pre-rc3-github.db`.
+The published package was installed in `releases/v0.2.10-rc.3-github`, with an
+atomic symlink switch, a preview-only launchd restart and a passing health gate.
+The previous local validation binaries remain available. The published binary
+also passed a real Codex context-resume turn and a browser history/mobile check.
+A deployment receipt and screenshots are saved under the Mac preview's
+`acceptance/` directory. Neither existing Mac service was restarted.

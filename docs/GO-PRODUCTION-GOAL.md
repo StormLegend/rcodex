@@ -126,3 +126,8 @@ is installed but not authenticated. Both older instances completed their 24-hour
 HTTP phases with 17,272 requests and zero failures; their 72-hour phases are still
 running. See [the acceptance record](GO-ACCEPTANCE-2026-10-08.md) and
 [Mac usage guide](MACMINI-QUICKSTART.md). Remaining production gates stay open.
+
+Published `v0.2.10-rc.3` from `6ff0d69`; Linux, macOS, browser and release checks
+passed. The Mac preview now serves the checksum-verified GitHub Darwin ARM64
+artifact from `releases/v0.2.10-rc.3-github`, with a pre-upgrade SQLite backup.
+A real Codex resume turn and browser checks passed on that published binary.
