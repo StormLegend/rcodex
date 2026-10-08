@@ -1,8 +1,8 @@
 # Go gateway production goal
 
 Started 2026-10-05. Owner: Codex. User explicitly requests two independent
-services. Keep the existing Node service running. Public Relay / Cloudflare
-deployment (item 1) is deferred. Do not claim this is a transparent HA cluster:
+services. Keep the existing Node service running. Public Relay deployment remains deferred. On 2026-10-08 the user explicitly
+authorized Cloudflare Tunnel for myrcodex.19920621.xyz; that named ingress is now deployed. Do not claim this is a transparent HA cluster:
 each gateway owns its sessions and data, and in-flight operations cannot move.
 
 ## Ordered acceptance checklist
@@ -131,3 +131,12 @@ Published `v0.2.10-rc.3` from `6ff0d69`; Linux, macOS, browser and release check
 passed. The Mac preview now serves the checksum-verified GitHub Darwin ARM64
 artifact from `releases/v0.2.10-rc.3-github`, with a pre-upgrade SQLite backup.
 A real Codex resume turn and browser checks passed on that published binary.
+
+## 2026-10-08 console and Cloudflare follow-up
+
+The user explicitly authorized `myrcodex.19920621.xyz`. An independent named
+Cloudflare Tunnel now exposes only the Mac preview's loopback listener. The
+macOS-inspired console adds modal setup, a compact sidebar, light/dark appearance,
+conversation search and safe Markdown/code copying. A real authenticated Codex
+turn and SSE/history checks passed through the public HTTPS hostname. See
+[the deployment and acceptance record](GO-UI-TUNNEL-2026-10-08.md).

@@ -39,7 +39,7 @@ async function fixture(t, prefix = "") {
       res.end(JSON.stringify(data));
     };
     if (!url.pathname.startsWith(prefix)) return send({}, 404);
-    if (path === "/console") {
+    if (path === "/console" || path === "/") {
       res.setHeader("Content-Type", "text/html; charset=utf-8");
       return res.end(html);
     }
@@ -179,6 +179,7 @@ async function fixture(t, prefix = "") {
   async function connect(fragment = false) {
     await page.goto(base + "/console" + (fragment ? "#token=" + token : ""));
     if (!fragment) {
+      await page.locator(".welcome-action").click();
       await page.locator("#token").fill(token);
       await page.locator("#connect").click();
     }
@@ -187,8 +188,10 @@ async function fixture(t, prefix = "") {
     );
   }
   async function create(title = "Browser acceptance") {
+    await page.locator("#new-conversation").click();
     await page.locator("#title").fill(title);
     await page.locator("#create").click();
+    await page.locator("#new-session").waitFor({ state: "hidden" });
     await page.waitForFunction(() => !document.querySelector("#send").disabled);
   }
   async function prompt(value) {
@@ -215,6 +218,7 @@ async function fixture(t, prefix = "") {
 test("auth, safe rendering, send, persisted history, and mobile layout", async (t) => {
   const f = await fixture(t);
   await f.page.goto(f.base + "/console");
+  await f.page.locator(".welcome-action").click();
   await f.page.locator("#token").fill("wrong");
   await f.page.locator("#connect").click();
   await f.page.locator("#status.error").waitFor();
@@ -247,6 +251,9 @@ test("auth, safe rendering, send, persisted history, and mobile layout", async (
     ),
     true,
   );
+  if (await f.page.evaluate(() => innerWidth <= 760))
+    await f.page.locator("#sidebar-toggle").click();
+  await f.page.locator("#connection-settings").click();
   await f.page.locator("#disconnect").click();
   assert.equal(await f.page.evaluate(() => sessionStorage.length), 0);
   assert.equal(await f.page.locator("#send").isDisabled(), true);
@@ -292,6 +299,9 @@ test("cancel tasks and close old SSE connections when switching or disconnecting
   await f.create("Second");
   await new Promise((resolve) => setTimeout(resolve, 100));
   assert.equal(f.streams.get(first)?.size || 0, 0);
+  if (await f.page.evaluate(() => innerWidth <= 760))
+    await f.page.locator("#sidebar-toggle").click();
+  await f.page.locator("#connection-settings").click();
   await f.page.locator("#disconnect").click();
   await new Promise((resolve) => setTimeout(resolve, 100));
   assert.equal(
@@ -317,4 +327,78 @@ test("retry preserves idempotency key and gateway path prefix", async (t) => {
   assert.equal(f.attempts.length, 2);
   assert.equal(f.attempts[0].idempotency_key, f.attempts[1].idempotency_key);
   assert.equal(f.turns.length, 1);
+});
+
+test("appearance, session search, safe Markdown, clipboard and mobile navigation", async (t) => {
+  const f = await fixture(t);
+  await f.connect();
+  await f.create("了解工作空间");
+  await f.prompt("请简要介绍这个项目。");
+  await f.page.waitForFunction(() =>
+    document.querySelector("#history").textContent.includes("REPLY:"),
+  );
+  f.turns[0].result =
+    '## 项目已就绪\n\n这是一个 **Go 网关**，可以在自己的设备上运行 Codex 和 Claude Code。\n\n- 会话独立保存\n- 支持实时响应与审批\n\n```go\nfmt.Println("Hello, rcodex")\n```\n\n<img src=x onerror="window.pwned=true">\n[unsafe](javascript:alert(1))\n[Docs](https://example.com/docs)';
+  await f.page.reload();
+  await f.page.locator(".code-block").waitFor();
+  assert.equal(await f.page.locator("#history h3").textContent(), "项目已就绪");
+  assert.equal(await f.page.locator("#history img").count(), 0);
+  assert.equal(await f.page.locator("#history a").count(), 1);
+  assert.equal(
+    await f.page.locator("#history a").getAttribute("rel"),
+    "noopener noreferrer",
+  );
+  await f.page
+    .context()
+    .grantPermissions(["clipboard-read", "clipboard-write"]);
+  await f.page.getByRole("button", { name: "复制代码", exact: true }).click();
+  assert.equal(
+    await f.page.evaluate(() => navigator.clipboard.readText()),
+    'fmt.Println("Hello, rcodex")',
+  );
+  await f.page.locator("#theme-toggle").click();
+  assert.equal(
+    await f.page.evaluate(() => document.documentElement.dataset.theme),
+    "dark",
+  );
+  await f.page.reload();
+  await f.page.locator(".code-block").waitFor();
+  assert.equal(
+    await f.page.evaluate(() => document.documentElement.dataset.theme),
+    "dark",
+  );
+  await f.page.locator("#theme-toggle").click();
+  await f.create("另一个项目");
+  await f.page.locator("#search").fill("工作空间");
+  assert.equal(await f.page.locator(".session").count(), 1);
+  await f.page.locator(".session").click();
+  await f.page.locator(".code-block").waitFor();
+  if (process.env.RCG_SCREENSHOT_DIR)
+    await f.page.screenshot({
+      path: process.env.RCG_SCREENSHOT_DIR + "/console-light.png",
+      fullPage: true,
+    });
+  await f.page.setViewportSize({ width: 390, height: 844 });
+  await f.page.locator("#sidebar").waitFor({ state: "hidden" });
+  assert.equal(await f.page.locator("#sidebar").isVisible(), false);
+  assert.equal(
+    await f.page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+    true,
+  );
+  if (process.env.RCG_SCREENSHOT_DIR)
+    await f.page.screenshot({
+      path: process.env.RCG_SCREENSHOT_DIR + "/console-mobile.png",
+      fullPage: true,
+    });
+  await f.page.locator("#sidebar-toggle").click();
+  await f.page.locator("#sidebar").waitFor({ state: "visible" });
+  assert.equal(await f.page.locator("#sidebar").isVisible(), true);
+  await f.page.locator("#new-conversation").click();
+  assert.equal(await f.page.locator("#new-session").isVisible(), true);
+  await f.page.keyboard.press("Escape");
+  await f.page.locator("#sidebar").waitFor({ state: "hidden" });
+  assert.equal(await f.page.locator("#new-session").isVisible(), false);
+  assert.equal(await f.page.locator("#sidebar").isVisible(), false);
 });

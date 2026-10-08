@@ -61,3 +61,18 @@ func TestCreateSessionPersistsResolvedDefaultWorkspace(t *testing.T) {
 		t.Fatalf("stored workspace=%q err=%v", stored.Workspace, err)
 	}
 }
+
+func TestConsoleRootAndPrivateAPICachePolicy(t *testing.T) {
+	s, _ := testServer(t)
+	h := s.Handler()
+	root := httptest.NewRecorder()
+	h.ServeHTTP(root, httptest.NewRequest(http.MethodGet, "/", nil))
+	if root.Code != http.StatusOK || !strings.Contains(root.Body.String(), `id="connect-form"`) || root.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("root status=%d cache=%q", root.Code, root.Header().Get("Cache-Control"))
+	}
+	private := httptest.NewRecorder()
+	h.ServeHTTP(private, httptest.NewRequest(http.MethodGet, "/api/sessions", nil))
+	if private.Code != http.StatusUnauthorized || private.Header().Get("Cache-Control") != "private, no-store" {
+		t.Fatalf("private status=%d cache=%q", private.Code, private.Header().Get("Cache-Control"))
+	}
+}

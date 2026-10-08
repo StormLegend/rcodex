@@ -32,6 +32,7 @@ var Version = "0.1.0-go"
 
 func (s *Server) Handler() http.Handler {
 	m := http.NewServeMux()
+	m.HandleFunc("/{$}", console)
 	m.HandleFunc("/healthz", s.health)
 	m.HandleFunc("/console", console)
 	m.HandleFunc("/console/", console)
@@ -113,6 +114,10 @@ func remoteKey(r *http.Request) string {
 func auth(c config.Config, next http.Handler) http.Handler {
 	limiter := newRateLimiter()
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Authenticated responses must not be stored by browsers or tunnel edges.
+		if strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/metrics" {
+			w.Header().Set("Cache-Control", "private, no-store")
+		}
 		if r.URL.Path != "/healthz" {
 			limit := c.RateLimitPerMinute
 			if r.Method == http.MethodGet || r.Method == http.MethodHead {
@@ -128,7 +133,7 @@ func auth(c config.Config, next http.Handler) http.Handler {
 				return
 			}
 		}
-		if r.URL.Path == "/healthz" || r.URL.Path == "/console" || strings.HasPrefix(r.URL.Path, "/console/") || strings.HasPrefix(r.URL.Path, "/webhooks/") {
+		if r.URL.Path == "/" || r.URL.Path == "/healthz" || r.URL.Path == "/console" || strings.HasPrefix(r.URL.Path, "/console/") || strings.HasPrefix(r.URL.Path, "/webhooks/") {
 			next.ServeHTTP(w, r)
 			return
 		}

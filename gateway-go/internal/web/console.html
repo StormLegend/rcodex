@@ -2,412 +2,1604 @@
 <html lang="zh-CN">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta
+      name="viewport"
+      content="width=device-width,initial-scale=1,viewport-fit=cover"
+    />
     <meta name="referrer" content="no-referrer" />
-    <title>rcodex · 控制台</title>
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#f5f5f7" />
+    <title>rcodex · 工作空间</title>
     <style>
       :root {
         color-scheme: light;
-        --ink: #172438;
-        --muted: #58677b;
-        --line: #dce3ed;
-        --accent: #235bcc;
-        --bg: #f4f7fb;
+        --bg: #fff;
+        --sidebar: rgba(244, 244, 246, 0.92);
+        --surface: #f5f5f7;
+        --raised: #fff;
+        --ink: #1d1d1f;
+        --muted: #77777e;
+        --line: rgba(0, 0, 0, 0.075);
+        --accent: #007aff;
+        --accent-soft: rgba(0, 122, 255, 0.1);
+        --hover: rgba(0, 0, 0, 0.045);
+        --shadow: 0 4px 20px rgba(0, 0, 0, 0.035);
+        --error: #c92b3c;
+        --success: #248a3d;
+        --sidebar-width: 260px;
+        --font:
+          -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI",
+          "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei",
+          "Noto Sans CJK SC", sans-serif;
+      }
+      :root[data-theme="dark"] {
+        color-scheme: dark;
+        --bg: #1c1c1e;
+        --sidebar: rgba(37, 37, 40, 0.96);
+        --surface: #2c2c2e;
+        --raised: #303033;
+        --ink: #f5f5f7;
+        --muted: #aaaab2;
+        --line: rgba(255, 255, 255, 0.09);
+        --accent: #5aa9ff;
+        --accent-soft: rgba(10, 132, 255, 0.18);
+        --hover: rgba(255, 255, 255, 0.055);
+        --shadow: 0 4px 20px rgba(0, 0, 0, 0.12);
+        --error: #ff7583;
+        --success: #66d184;
       }
       * {
         box-sizing: border-box;
       }
+      html,
       body {
+        height: 100%;
         margin: 0;
+      }
+      body {
         background: var(--bg);
         color: var(--ink);
-        font:
-          15px/1.55 system-ui,
-          -apple-system,
-          sans-serif;
+        font: 14px/1.5 var(--font);
+        -webkit-font-smoothing: antialiased;
       }
       button,
       input,
       select,
       textarea {
         font: inherit;
+        color: inherit;
+      }
+      button {
+        cursor: pointer;
+        -webkit-tap-highlight-color: transparent;
+      }
+      button:disabled {
+        opacity: 0.38;
+        cursor: default;
+      }
+      button {
+        border: 0;
+        background: none;
       }
       button,
       input,
       select,
       textarea {
-        border: 1px solid var(--line);
-        border-radius: 9px;
-        padding: 10px 12px;
+        outline: none;
+      }
+      button:focus-visible,
+      input:focus-visible,
+      select:focus-visible,
+      textarea:focus-visible,
+      summary:focus-visible {
+        outline: 3px solid var(--accent);
+        outline-offset: 3px;
       }
       input,
       select,
       textarea {
-        background: #fff;
-        color: var(--ink);
         min-width: 0;
         width: 100%;
+        background: var(--surface);
+        border: 1px solid transparent;
+        border-radius: 10px;
+        padding: 11px 12px;
       }
-      button {
-        cursor: pointer;
-        background: #fff;
+      input:focus,
+      select:focus,
+      textarea:focus {
+        border-color: var(--accent);
+      }
+      textarea {
+        resize: none;
+      }
+      input::placeholder,
+      textarea::placeholder {
+        color: var(--muted);
+      }
+      h1,
+      h2,
+      h3,
+      p {
+        margin: 0;
+      }
+      svg.icon {
+        width: 19px;
+        height: 19px;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 1.7;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        flex-shrink: 0;
+      }
+      .icon-button {
+        width: 36px;
+        height: 36px;
+        border-radius: 9px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--muted);
+        flex-shrink: 0;
+      }
+      .icon-button:hover {
+        background: var(--hover);
         color: var(--ink);
-        min-height: 44px;
-      }
-      button:hover {
-        border-color: var(--accent);
-      }
-      button:disabled {
-        opacity: 0.5;
-        cursor: default;
-      }
-      .primary {
-        background: var(--accent);
-        color: #fff;
-        border-color: var(--accent);
-      }
-      .danger {
-        color: #aa2532;
       }
       .muted,
       small {
         color: var(--muted);
       }
-      h1,
-      h2,
-      p {
-        margin: 0;
+      .sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
       }
-      h1 {
-        font-size: 23px;
-        letter-spacing: -0.7px;
+      .app {
+        height: 100dvh;
+        display: grid;
+        grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+        transition: grid-template-columns 0.2s ease;
       }
-      h2 {
-        font-size: 17px;
+      .sidebar {
+        min-width: 0;
+        background: var(--sidebar);
+        border-right: 1px solid var(--line);
+        display: flex;
+        flex-direction: column;
+        padding: 26px 16px 16px;
+        gap: 22px;
+        overflow: hidden;
+        backdrop-filter: blur(24px);
       }
-      header {
-        background: #fff;
-        border-bottom: 1px solid var(--line);
-        padding: 20px 28px;
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 11px;
+        padding: 0 8px;
+      }
+      .app-icon {
+        display: grid;
+        place-items: center;
+        width: 34px;
+        height: 34px;
+        border-radius: 10px;
+        background: linear-gradient(145deg, #414146, #19191b);
+        color: #fff;
+        box-shadow:
+          0 2px 4px #0002,
+          inset 0 1px 0 #ffffff2b;
+        flex-shrink: 0;
+      }
+      .app-icon .icon {
+        width: 21px;
+        height: 21px;
+        stroke-width: 1.8;
+      }
+      .brand-name {
+        font-size: 20px;
+        font-weight: 660;
+        letter-spacing: -0.8px;
+      }
+      .brand-note {
+        font-size: 10px;
+        color: var(--muted);
+        letter-spacing: 0.7px;
+      }
+      .new-button {
+        border-radius: 11px;
+        background: var(--raised);
+        border: 1px solid var(--line);
+        box-shadow: 0 1px 2px #00000003;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 9px;
+        padding: 11px;
+        font-weight: 550;
+      }
+      .new-button:hover {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+      .search {
+        position: relative;
+        margin-top: -8px;
+      }
+      .search .icon {
+        position: absolute;
+        left: 11px;
+        top: 10px;
+        width: 16px;
+        height: 16px;
+        color: var(--muted);
+      }
+      .search input {
+        padding: 8px 10px 8px 34px;
+        font-size: 12px;
+        background: var(--hover);
+        border-radius: 8px;
+      }
+      .session-section {
+        flex: 1;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .section-label {
         display: flex;
         align-items: center;
         justify-content: space-between;
-        gap: 16px;
-      }
-      .tag {
-        font-size: 12px;
-        border-radius: 20px;
-        background: #edf2fa;
-        padding: 5px 10px;
-      }
-      .shell {
-        max-width: 1400px;
-        margin: auto;
-        padding: 22px;
-        display: grid;
-        grid-template-columns: 320px minmax(0, 1fr);
-        gap: 20px;
-      }
-      .card {
-        background: #fff;
-        border: 1px solid var(--line);
-        border-radius: 14px;
-        padding: 20px;
-      }
-      .stack {
-        display: grid;
-        gap: 14px;
-      }
-      .row {
-        display: flex;
-        gap: 10px;
-        align-items: center;
-        flex-wrap: wrap;
-      }
-      .row > * {
-        flex: 1;
-      }
-      .row > button {
-        flex: 0 0 auto;
-      }
-      label {
-        display: grid;
-        gap: 5px;
-        font-size: 13px;
+        padding: 0 8px;
+        font-size: 11px;
         font-weight: 600;
+        color: var(--muted);
       }
-      .notice {
-        font-size: 13px;
-        overflow-wrap: anywhere;
-        padding-top: 8px;
+      .section-label .icon-button {
+        height: 25px;
+        width: 25px;
       }
-      .error {
-        color: #aa2532;
+      .section-label .icon {
+        width: 14px;
+        height: 14px;
       }
       #sessions {
+        min-height: 0;
+        overflow: auto;
         display: grid;
         grid-auto-rows: min-content;
         align-content: start;
-        gap: 7px;
-        max-height: 380px;
-        overflow: auto;
+        gap: 4px;
+        scrollbar-width: thin;
       }
       .session {
-        min-height: 72px;
-        text-align: left;
-        width: 100%;
+        min-height: 66px;
         display: grid;
-        gap: 3px;
-        overflow-wrap: anywhere;
+        grid-template-columns: 22px minmax(0, 1fr);
+        gap: 0 8px;
+        align-items: center;
+        width: 100%;
+        padding: 11px 12px;
+        text-align: left;
+        border-radius: 10px;
+        border: 1px solid transparent;
+      }
+      .session:hover {
+        background: var(--hover);
       }
       .session.active {
-        border-color: var(--accent);
-        background: #eef4ff;
+        background: var(--accent-soft);
+        color: var(--accent);
       }
-      .session small {
-        font-size: 12px;
-      }
-      summary {
-        cursor: pointer;
-        font-weight: 600;
-        min-height: 32px;
-      }
-      .form-fields {
-        padding-top: 14px;
-        display: grid;
-        gap: 12px;
-      }
-      .chat {
-        min-width: 0;
-        display: flex;
-        flex-direction: column;
-        gap: 16px;
-      }
-      .chat-heading {
-        border-bottom: 1px solid var(--line);
-        padding-bottom: 14px;
-        overflow-wrap: anywhere;
-      }
-      #history {
-        min-height: 200px;
-        max-height: 60vh;
-        overflow: auto;
-        display: grid;
-        align-content: start;
-        gap: 18px;
-        scroll-behavior: smooth;
-      }
-      .empty {
-        padding: 38px 15px;
-        text-align: center;
+      .session .icon {
+        grid-row: 1 / 3;
+        width: 17px;
+        height: 17px;
+        align-self: start;
+        margin-top: 2px;
         color: var(--muted);
       }
-      .turn {
-        display: grid;
-        gap: 8px;
+      .session.active .icon {
+        color: var(--accent);
+      }
+      .session strong {
+        font-size: 12px;
+        font-weight: 550;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .session small {
+        font-size: 10px;
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+      }
+      .sidebar-empty {
+        font-size: 12px;
+        padding: 18px 12px;
+        color: var(--muted);
+        line-height: 1.8;
+      }
+      .text-button {
+        color: var(--accent);
+        font-size: 12px;
+        padding: 8px;
+        border-radius: 8px;
+      }
+      .text-button:hover {
+        background: var(--accent-soft);
+      }
+      .sidebar-footer {
+        border-top: 1px solid var(--line);
+        padding-top: 14px;
+        display: flex;
+        align-items: center;
+        gap: 3px;
+      }
+      .gateway-button {
+        flex: 1;
         min-width: 0;
+        display: flex;
+        align-items: center;
+        text-align: left;
+        gap: 10px;
+        padding: 6px;
+        border-radius: 9px;
+      }
+      .gateway-button:hover {
+        background: var(--hover);
+      }
+      .gateway-avatar {
+        width: 30px;
+        height: 30px;
+        border-radius: 9px;
+        background: var(--raised);
+        display: grid;
+        place-items: center;
+        color: var(--muted);
+        border: 1px solid var(--line);
+        flex-shrink: 0;
+      }
+      .gateway-copy {
+        display: grid;
+        min-width: 0;
+        gap: 1px;
+      }
+      .gateway-copy strong {
+        font-size: 12px;
+        font-weight: 550;
+      }
+      .gateway-copy small {
+        font-size: 10px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .connection-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--muted);
+        display: inline-block;
+        margin-right: 5px;
+      }
+      .connected .connection-dot {
+        background: var(--success);
+      }
+      .main {
+        min-width: 0;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+      }
+      .toolbar {
+        height: 78px;
+        flex-shrink: 0;
+        border-bottom: 1px solid var(--line);
+        display: flex;
+        align-items: center;
+        gap: 15px;
+        padding: 0 28px;
+      }
+      .toolbar-heading {
+        min-width: 0;
+        flex: 1;
+      }
+      #session-title {
+        font-size: 14px;
+        font-weight: 620;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        letter-spacing: -0.2px;
+      }
+      #session-info {
+        font-size: 11px;
+        color: var(--muted);
+        display: block;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        margin-top: 3px;
+      }
+      .toolbar-pill {
+        font-size: 11px;
+        color: var(--muted);
+        padding: 5px 10px;
+        border-radius: 20px;
+        background: var(--surface);
+        white-space: nowrap;
+      }
+      .conversation {
+        display: flex;
+        flex-direction: column;
+        flex: 1;
+        min-height: 0;
+        position: relative;
+      }
+      #history {
+        flex: 1;
+        min-height: 0;
+        overflow: auto;
+        padding: 36px clamp(20px, 5vw, 72px) 26px;
+        scrollbar-width: thin;
+        scroll-behavior: smooth;
+      }
+      .welcome {
+        min-height: 100%;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        max-width: 670px;
+        margin: auto;
+        padding: 24px 0 40px;
+      }
+      .welcome .app-icon {
+        width: 62px;
+        height: 62px;
+        border-radius: 19px;
+        margin-bottom: 26px;
+        box-shadow:
+          0 7px 18px #00000016,
+          inset 0 1px 1px #ffffff3b;
+      }
+      .welcome .app-icon .icon {
+        width: 34px;
+        height: 34px;
+      }
+      .welcome h2 {
+        font-size: 34px;
+        line-height: 1.3;
+        font-weight: 620;
+        letter-spacing: -1.3px;
+      }
+      .welcome p {
+        color: var(--muted);
+        font-size: 14px;
+        line-height: 1.8;
+        margin-top: 12px;
+        max-width: 380px;
+      }
+      .welcome-action {
+        margin-top: 23px;
+      }
+      .primary {
+        background: #007aff;
+        color: #fff;
+        box-shadow: 0 1px 3px #007aff26;
+        border-radius: 9px;
+        padding: 10px 18px;
+        font-weight: 550;
+      }
+      .primary:hover {
+        background: #006ae0;
+      }
+      .secondary {
+        background: var(--surface);
+        border-radius: 9px;
+        padding: 10px 16px;
+      }
+      .secondary:hover {
+        background: var(--hover);
+      }
+      .suggestions {
+        width: 100%;
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 11px;
+        margin-top: 44px;
+      }
+      .suggestion {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        text-align: left;
+        gap: 7px;
+        padding: 16px;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        transition:
+          background 0.15s,
+          border-color 0.15s;
+      }
+      .suggestion:hover {
+        background: var(--surface);
+        border-color: var(--accent);
+      }
+      .suggestion .icon {
+        color: var(--muted);
+        margin-bottom: 5px;
+      }
+      .suggestion strong {
+        font-size: 12px;
+        font-weight: 550;
+      }
+      .suggestion small {
+        font-size: 11px;
+        line-height: 1.6;
+      }
+      .turn {
+        max-width: 790px;
+        margin: 0 auto 33px;
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 15px;
       }
       .bubble {
         white-space: pre-wrap;
         overflow-wrap: anywhere;
-        padding: 13px 15px;
-        border-radius: 12px;
-        background: #f1f5fc;
+        line-height: 1.75;
+      }
+      .user-message {
+        align-self: flex-end;
+        max-width: 85%;
+        background: var(--surface);
+        padding: 12px 17px;
+        border-radius: 18px 18px 5px 18px;
+        font-size: 14px;
+      }
+      .assistant-label {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 11px;
+        font-weight: 600;
+        margin: 3px 0 -5px;
+      }
+      .assistant-label .assistant-mark {
+        width: 22px;
+        height: 22px;
+        background: var(--surface);
+        border-radius: 7px;
+        display: grid;
+        place-items: center;
+        font-size: 11px;
       }
       .answer {
-        background: #f7f8fa;
+        font-size: 14px;
+        white-space: normal;
+        padding-left: 30px;
+        line-height: 1.85;
       }
-      .turn-state {
-        font-size: 12px;
+      .answer p {
+        margin: 0 0 12px;
+        white-space: pre-wrap;
+      }
+      .answer p:last-child {
+        margin-bottom: 0;
+      }
+      .answer h2,
+      .answer h3,
+      .answer h4 {
+        margin: 20px 0 10px;
+        font-weight: 600;
+        line-height: 1.5;
+      }
+      .answer h2 {
+        font-size: 21px;
+      }
+      .answer h3 {
+        font-size: 18px;
+      }
+      .answer h4 {
+        font-size: 15px;
+      }
+      .answer ul,
+      .answer ol {
+        margin: 8px 0 14px;
+        padding-left: 23px;
+      }
+      .answer li {
+        padding: 2px 0;
+      }
+      .answer code {
+        font:
+          12px/1.7 ui-monospace,
+          SFMono-Regular,
+          Menlo,
+          monospace;
+        background: var(--surface);
+        padding: 2px 5px;
+        border-radius: 4px;
+      }
+      .answer a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .answer a:hover {
+        text-decoration: underline;
+      }
+      .code-block {
+        min-width: 0;
+        max-width: 100%;
+        margin: 14px 0;
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        overflow: hidden;
+      }
+      .code-heading {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 7px 12px;
+        border-bottom: 1px solid var(--line);
+        font-size: 10px;
         color: var(--muted);
       }
-      textarea {
-        resize: vertical;
-        min-height: 110px;
+      .code-copy {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        color: var(--muted);
+        padding: 4px 6px;
+        border-radius: 5px;
+        font-size: 10px;
       }
-      .composer {
-        display: grid;
-        gap: 10px;
-        padding-top: 14px;
-        border-top: 1px solid var(--line);
+      .code-copy .icon {
+        width: 12px;
+        height: 12px;
       }
-      .composer .row {
-        justify-content: space-between;
+      .code-copy:hover {
+        background: var(--hover);
       }
-      .composer small {
-        flex: 1;
+      .code-block pre {
+        margin: 0;
+        padding: 15px;
+        overflow: auto;
+        max-width: 100%;
+        font:
+          12px/1.8 ui-monospace,
+          SFMono-Regular,
+          Menlo,
+          monospace;
+        white-space: pre;
+      }
+      .code-block pre code {
+        padding: 0;
+        background: transparent;
+      }
+      .turn-state {
+        padding-left: 30px;
+        color: var(--muted);
+        font-size: 10px;
+        display: flex;
+        gap: 5px;
+        align-items: center;
+      }
+      .turn-state .icon {
+        width: 12px;
+        height: 12px;
+      }
+      .turn-state.failed {
+        color: var(--error);
       }
       #stream-preview {
+        max-height: 160px;
+        overflow: auto;
         white-space: pre-wrap;
         overflow-wrap: anywhere;
-        max-height: 240px;
+        padding: 0 30px 14px;
+        font-size: 13px;
+        color: var(--muted);
+        max-width: 850px;
+        width: 100%;
+        margin: 0 auto;
+      }
+      #approvals {
+        max-height: 38vh;
         overflow: auto;
-        font-size: 14px;
+        max-width: 850px;
+        width: 100%;
+        margin: 0 auto;
+        padding: 0 24px;
       }
       #approvals:empty,
       #stream-preview:empty {
         display: none;
       }
       .approval {
-        border: 1px solid #e9c379;
-        border-radius: 10px;
-        padding: 14px;
-        background: #fffbf2;
-        margin-bottom: 10px;
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 18px;
+        margin-bottom: 16px;
+      }
+      .approval > strong {
+        display: block;
+        font-size: 13px;
+        margin-bottom: 9px;
       }
       .approval pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        max-height: 120px;
+        overflow: auto;
         font-size: 12px;
+      }
+      .approval label {
+        margin: 12px 0;
+      }
+      .approval .row {
+        margin-top: 12px;
+      }
+      .danger {
+        color: var(--error);
+      }
+      .composer-wrap {
+        padding: 6px clamp(20px, 5vw, 72px)
+          max(14px, env(safe-area-inset-bottom));
+        flex-shrink: 0;
+      }
+      .composer {
+        max-width: 790px;
+        margin: auto;
+        background: var(--raised);
+        border: 1px solid var(--line);
+        border-radius: 20px;
+        padding: 5px 7px 7px;
+        box-shadow: 0 3px 16px #00000006;
+        transition:
+          border-color 0.2s,
+          box-shadow 0.2s;
+      }
+      .composer:focus-within {
+        border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+        box-shadow: 0 3px 18px #00000008;
+      }
+      .composer textarea {
+        min-height: 65px;
         max-height: 180px;
-        overflow: auto;
-        white-space: pre-wrap;
-        overflow-wrap: anywhere;
+        padding: 13px 13px 5px;
+        background: transparent;
+        border: 0;
+        border-radius: 13px;
+        line-height: 1.6;
+        display: block;
+        font-size: 14px;
       }
-      #events {
+      .composer textarea:focus-visible {
+        outline: none;
+      }
+      .composer-actions {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        padding: 0 2px 0 11px;
+        min-height: 36px;
+      }
+      .composer-context {
+        font-size: 10px;
+        color: var(--muted);
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        flex: 1;
+        min-width: 0;
+      }
+      .composer-context .icon {
+        width: 12px;
+        height: 12px;
+      }
+      .composer-context span {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      #cancel {
+        font-size: 11px;
+        color: var(--error);
+        display: flex;
+        gap: 5px;
+        align-items: center;
+        padding: 7px;
+        border-radius: 8px;
+      }
+      #cancel .icon {
+        width: 13px;
+        height: 13px;
+      }
+      #cancel:disabled {
+        display: none;
+      }
+      .send-button {
+        width: 34px;
+        height: 34px;
+        background: #007aff;
+        color: #fff;
+        border-radius: 50%;
+        display: grid;
+        place-items: center;
+        flex-shrink: 0;
+      }
+      .send-button:hover {
+        background: #006ae0;
+      }
+      .send-button .icon {
+        width: 19px;
+        height: 19px;
+        stroke-width: 2.3;
+      }
+      .composer-footnote {
+        max-width: 790px;
+        margin: 9px auto 0;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 10px;
+        font-size: 10px;
+        color: var(--muted);
+      }
+      .composer-footnote .keys {
+        font-size: 10px;
+        opacity: 0.8;
+      }
+      .status-banner:not(.error) {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+      }
+      .status-banner.error {
+        position: absolute;
+        z-index: 5;
+        top: 10px;
+        left: 24px;
+        right: 24px;
+        margin: auto;
+        max-width: 730px;
+        background: var(--raised);
+        border: 1px solid var(--error);
+        border-radius: 12px;
+        padding: 12px 16px;
         font-size: 12px;
-        max-height: 220px;
-        overflow: auto;
-        white-space: pre-wrap;
-        overflow-wrap: anywhere;
+        color: var(--error);
+        box-shadow: var(--shadow);
       }
-      .footer {
+      .row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+      .row > button {
+        flex: 0 0 auto;
+      }
+      dialog {
+        color: var(--ink);
+        background: var(--bg);
+        width: min(460px, calc(100vw - 32px));
+        max-height: calc(100dvh - 40px);
+        border: 1px solid var(--line);
+        border-radius: 22px;
+        padding: 0;
+        box-shadow: 0 24px 90px #0003;
+        overflow: auto;
+      }
+      dialog::backdrop {
+        background: rgba(15, 18, 24, 0.26);
+        backdrop-filter: blur(7px);
+      }
+      .dialog-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 24px 24px 12px;
+      }
+      .dialog-header h2 {
+        font-size: 20px;
+        font-weight: 620;
+        letter-spacing: -0.6px;
+      }
+      .dialog-content {
+        padding: 10px 24px 26px;
+      }
+      .dialog-subtitle {
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.8;
+        margin-bottom: 22px;
+      }
+      .form-fields {
+        display: grid;
+        gap: 18px;
+      }
+      label {
+        display: grid;
+        gap: 7px;
+        font-size: 12px;
+        font-weight: 550;
+      }
+      label small {
+        font-weight: 400;
+        font-size: 11px;
+      }
+      select {
+        appearance: auto;
+      }
+      .form-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 14px;
+      }
+      .form-fields .primary {
+        width: 100%;
+        margin-top: 4px;
+      }
+      .advanced summary {
+        color: var(--muted);
+        font-size: 12px;
+        cursor: pointer;
+        list-style-position: inside;
+      }
+      .advanced label {
+        margin-top: 12px;
+      }
+      .dialog-footnote {
+        font-size: 11px;
+        color: var(--muted);
+        line-height: 1.7;
+      }
+      .password-field {
+        position: relative;
+      }
+      .password-field input {
+        padding-right: 44px;
+      }
+      .password-field .icon-button {
+        position: absolute;
+        right: 4px;
+        top: 4px;
+      }
+      .connection-actions {
+        display: flex;
+        gap: 10px;
+        justify-content: flex-end;
+        align-items: center;
+        margin-top: 20px;
+      }
+      .connection-actions .primary {
+        margin: 0;
+        width: auto;
+      }
+      .connection-actions #disconnect {
+        margin-right: auto;
+        font-size: 11px;
+        color: var(--muted);
+        padding: 8px 0;
+      }
+      .connection-actions #disconnect:disabled {
+        display: none;
+      }
+      #connection-feedback {
         font-size: 12px;
         color: var(--muted);
-        text-align: center;
-        padding: 0 20px 20px;
+        line-height: 1.7;
+        margin-top: 14px;
+      }
+      #connection-feedback.error {
+        color: var(--error);
+      }
+      .connection-meta {
+        border-top: 1px solid var(--line);
+        margin-top: 23px;
+        padding-top: 15px;
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+        font-size: 10px;
+        color: var(--muted);
+      }
+      #events {
+        max-height: 60vh;
+        overflow: auto;
+        font:
+          11px/1.7 ui-monospace,
+          monospace;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      #events-dialog {
+        width: min(700px, calc(100vw - 32px));
+      }
+      .sidebar-collapsed .app {
+        grid-template-columns: 0 minmax(0, 1fr);
+      }
+      .sidebar-collapsed .sidebar {
+        visibility: hidden;
+      }
+      #sidebar-overlay {
+        display: none;
       }
       [hidden] {
         display: none !important;
       }
+      @media (min-width: 1500px) {
+        :root {
+          --sidebar-width: 282px;
+        }
+        .sidebar {
+          padding-left: 21px;
+          padding-right: 21px;
+        }
+      }
       @media (max-width: 760px) {
-        header {
-          padding: 16px;
-        }
-        .shell {
+        .app {
           grid-template-columns: 1fr;
-          padding: 12px;
-          gap: 12px;
         }
-        .card {
-          padding: 16px;
+        .sidebar {
+          position: fixed;
+          z-index: 31;
+          inset: 0 auto 0 0;
+          width: min(290px, 85vw);
+          transform: translateX(-100%);
+          visibility: hidden;
+          transition:
+            transform 0.2s,
+            visibility 0.2s;
+          padding-top: max(24px, env(safe-area-inset-top));
+          background: var(--bg);
         }
-        #sessions {
-          max-height: 200px;
+        .sidebar-open .sidebar {
+          transform: translateX(0);
+          visibility: visible;
+        }
+        .sidebar-open #sidebar-overlay {
+          display: block;
+          position: fixed;
+          inset: 0;
+          background: #0005;
+          backdrop-filter: blur(3px);
+          z-index: 30;
+        }
+        .sidebar-collapsed .app {
+          grid-template-columns: 1fr;
+        }
+        .toolbar {
+          height: 66px;
+          padding: 0 14px;
+          gap: 9px;
+          padding-top: env(safe-area-inset-top);
+        }
+        .toolbar-pill {
+          display: none;
+        }
+        .toolbar .icon-button {
+          width: 34px;
+          height: 40px;
+        }
+        #session-title {
+          font-size: 13px;
+        }
+        #session-info {
+          font-size: 10px;
         }
         #history {
-          max-height: 55vh;
+          padding: 24px 20px 16px;
         }
-        header .tag {
-          font-size: 11px;
+        .welcome {
+          padding: 15px 0 25px;
         }
-        .row {
+        .welcome h2 {
+          font-size: 28px;
+          letter-spacing: -1px;
+        }
+        .welcome p {
+          font-size: 12px;
+          max-width: 260px;
+        }
+        .welcome .app-icon {
+          width: 52px;
+          height: 52px;
+          border-radius: 16px;
+          margin-bottom: 23px;
+        }
+        .suggestions {
+          grid-template-columns: 1fr;
+          margin-top: 30px;
           gap: 8px;
+          max-width: 310px;
+        }
+        .suggestion {
+          display: grid;
+          grid-template-columns: 22px 1fr;
+          gap: 2px 10px;
+          padding: 12px 15px;
+        }
+        .suggestion .icon {
+          grid-row: 1/3;
+          margin: 2px 0 0;
+        }
+        .suggestion strong {
+          font-size: 12px;
+        }
+        .suggestion small {
+          font-size: 10px;
+        }
+        .composer-wrap {
+          padding: 6px 14px max(12px, env(safe-area-inset-bottom));
+        }
+        .composer {
+          border-radius: 18px;
+        }
+        .composer textarea {
+          font-size: 16px;
+          min-height: 60px;
+        }
+        .composer-footnote .keys {
+          display: none;
+        }
+        .composer-footnote {
+          justify-content: center;
+          font-size: 9px;
+        }
+        .user-message {
+          max-width: 92%;
+          font-size: 13px;
+        }
+        .answer {
+          font-size: 13px;
+          padding-left: 0;
+        }
+        .turn-state {
+          padding-left: 0;
+        }
+        .turn {
+          margin-bottom: 28px;
+        }
+        .status-banner.error {
+          left: 12px;
+          right: 12px;
+          top: 5px;
+        }
+        .dialog-header {
+          padding: 20px 20px 10px;
+        }
+        .dialog-content {
+          padding: 10px 20px 22px;
+        }
+        input,
+        select {
+          font-size: 16px;
+        }
+        label {
+          font-size: 12px;
+        }
+        .form-grid {
+          gap: 10px;
+        }
+        .form-fields {
+          gap: 15px;
+        }
+        .icon-button {
+          min-width: 40px;
+          min-height: 40px;
+        }
+        #search {
+          font-size: 14px;
+        }
+        .sidebar .section-label .icon-button {
+          min-height: 30px;
+          min-width: 30px;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+          transition: none !important;
+          scroll-behavior: auto !important;
         }
       }
     </style>
   </head>
   <body>
-    <header>
-      <div>
-        <h1>rcodex <span class="muted">控制台</span></h1>
-        <small>在你的设备上继续工作</small>
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      style="position: absolute; width: 0; height: 0; overflow: hidden"
+      aria-hidden="true"
+    >
+      <defs>
+        <symbol id="i-terminal" viewBox="0 0 24 24">
+          <path d="m5 6 6 6-6 6m9 0h5" />
+        </symbol>
+        <symbol id="i-compose" viewBox="0 0 24 24">
+          <path
+            d="M12 5H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7M16 3l5 5M10 14l1-5 8-8 4 4-8 8-5 1Z"
+            transform="translate(0 1) scale(.9)"
+          />
+        </symbol>
+        <symbol id="i-sidebar" viewBox="0 0 24 24">
+          <rect x="3" y="4" width="18" height="16" rx="3" />
+          <path d="M9 4v16m-3-12h0m0 4h0" />
+        </symbol>
+        <symbol id="i-search" viewBox="0 0 24 24">
+          <circle cx="10.5" cy="10.5" r="6.5" />
+          <path d="m16 16 4 4" />
+        </symbol>
+        <symbol id="i-refresh" viewBox="0 0 24 24">
+          <path
+            d="M20 7v5h-5M4 17v-5h5M6.5 6.5A8 8 0 0 1 20 12M4 12a8 8 0 0 0 13.5 5.5"
+          />
+        </symbol>
+        <symbol id="i-message" viewBox="0 0 24 24">
+          <path
+            d="M5 4h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-5 3v-3a2 2 0 0 1-2-2V6a2 2 0 0 1 3-2Z"
+          />
+        </symbol>
+        <symbol id="i-device" viewBox="0 0 24 24">
+          <rect x="3" y="4" width="18" height="12" rx="2" />
+          <path d="M8 21h8m-4-5v5" />
+        </symbol>
+        <symbol id="i-moon" viewBox="0 0 24 24">
+          <path d="M20 15.5A9 9 0 0 1 8.5 4 9 9 0 1 0 20 15.5Z" />
+        </symbol>
+        <symbol id="i-sun" viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="4" />
+          <path
+            d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5"
+          />
+        </symbol>
+        <symbol id="i-close" viewBox="0 0 24 24">
+          <path d="m6 6 12 12M6 18 18 6" />
+        </symbol>
+        <symbol id="i-up" viewBox="0 0 24 24">
+          <path d="M12 19V5m-6 6 6-6 6 6" />
+        </symbol>
+        <symbol id="i-stop" viewBox="0 0 24 24">
+          <rect x="6" y="6" width="12" height="12" rx="2" />
+        </symbol>
+        <symbol id="i-folder" viewBox="0 0 24 24">
+          <path
+            d="M3 7V5a2 2 0 0 1 2-2h5l3 4h6a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"
+          />
+        </symbol>
+        <symbol id="i-code" viewBox="0 0 24 24">
+          <path d="m7 7-5 5 5 5m10-10 5 5-5 5m-7 3 4-16" />
+        </symbol>
+        <symbol id="i-plan" viewBox="0 0 24 24">
+          <path d="M9 5h12M9 12h12M9 19h12M3 5h1m-1 7h1m-1 7h1" />
+        </symbol>
+        <symbol id="i-more" viewBox="0 0 24 24">
+          <circle cx="5" cy="12" r="1" />
+          <circle cx="12" cy="12" r="1" />
+          <circle cx="19" cy="12" r="1" />
+        </symbol>
+        <symbol id="i-copy" viewBox="0 0 24 24">
+          <rect x="8" y="8" width="12" height="13" rx="2" />
+          <path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3" />
+        </symbol>
+        <symbol id="i-check" viewBox="0 0 24 24">
+          <path d="m5 12 4 4L19 6" />
+        </symbol>
+        <symbol id="i-eye" viewBox="0 0 24 24">
+          <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7S2 12 2 12Z" />
+          <circle cx="12" cy="12" r="3" />
+        </symbol>
+      </defs>
+    </svg>
+    <div class="app">
+      <aside class="sidebar" id="sidebar" aria-label="会话导航">
+        <div class="brand">
+          <span class="app-icon"
+            ><svg class="icon" aria-hidden="true">
+              <use href="#i-terminal" /></svg
+          ></span>
+          <div>
+            <div class="brand-name">rcodex</div>
+            <div class="brand-note">YOUR WORKSPACE</div>
+          </div>
+        </div>
+        <button id="new-conversation" class="new-button">
+          <svg class="icon" aria-hidden="true"><use href="#i-compose" /></svg
+          >新建对话
+        </button>
+        <label class="search"
+          ><span class="sr-only">搜索对话</span
+          ><svg class="icon" aria-hidden="true"><use href="#i-search" /></svg
+          ><input
+            id="search"
+            type="search"
+            placeholder="搜索对话"
+            autocomplete="off"
+        /></label>
+        <section class="session-section">
+          <div class="section-label">
+            <span>最近对话</span
+            ><button
+              id="refresh"
+              class="icon-button"
+              aria-label="刷新会话"
+              title="刷新会话"
+              disabled
+            >
+              <svg class="icon" aria-hidden="true">
+                <use href="#i-refresh" />
+              </svg>
+            </button>
+          </div>
+          <nav id="sessions" aria-label="对话列表"></nav>
+          <button id="more-sessions" class="text-button" hidden>
+            加载更多会话
+          </button>
+        </section>
+        <div class="sidebar-footer">
+          <button
+            id="connection-settings"
+            class="gateway-button"
+            aria-label="网关连接设置"
+          >
+            <span class="gateway-avatar"
+              ><svg class="icon" aria-hidden="true">
+                <use href="#i-device" /></svg></span
+            ><span class="gateway-copy"
+              ><strong
+                ><span class="connection-dot"></span
+                ><span id="connection-label">连接网关</span></strong
+              ><small id="gateway-host">你的设备，你的工作空间</small></span
+            ></button
+          ><button
+            id="theme-toggle"
+            class="icon-button"
+            aria-label="切换深色模式"
+            title="切换深色模式"
+          >
+            <svg class="icon" aria-hidden="true"><use href="#i-moon" /></svg>
+          </button>
+        </div>
+      </aside>
+      <button
+        id="sidebar-overlay"
+        aria-label="关闭侧边栏"
+        tabindex="-1"
+      ></button>
+      <main class="main">
+        <header class="toolbar">
+          <button
+            id="sidebar-toggle"
+            class="icon-button"
+            aria-label="切换侧边栏"
+            aria-controls="sidebar"
+            aria-expanded="true"
+          >
+            <svg class="icon" aria-hidden="true"><use href="#i-sidebar" /></svg>
+          </button>
+          <div class="toolbar-heading">
+            <h1 id="session-title">工作空间</h1>
+            <span id="session-info">Codex 与 Claude Code，随时继续。</span>
+          </div>
+          <span class="toolbar-pill" id="session-mode">为专注而设计</span
+          ><button
+            id="events-toggle"
+            class="icon-button"
+            aria-label="查看连接事件"
+            title="连接事件"
+          >
+            <svg class="icon" aria-hidden="true"><use href="#i-more" /></svg>
+          </button>
+        </header>
+        <section class="conversation" aria-label="对话">
+          <p id="status" class="status-banner" role="status" aria-live="polite">
+            输入访问令牌开始。
+          </p>
+          <button id="more-history" class="text-button" hidden>
+            加载更早的对话
+          </button>
+          <div id="history" aria-live="polite"></div>
+          <div id="stream-preview" aria-live="polite"></div>
+          <div id="approvals"></div>
+          <div class="composer-wrap">
+            <form id="prompt-form" class="composer">
+              <label for="prompt" class="sr-only">任务内容</label
+              ><textarea
+                id="prompt"
+                placeholder="描述你的想法，接下来交给助手…"
+                rows="2"
+                disabled
+                required
+              ></textarea>
+              <div class="composer-actions">
+                <div class="composer-context">
+                  <svg class="icon" aria-hidden="true">
+                    <use href="#i-folder" /></svg
+                  ><span id="composer-context">选择会话开始</span>
+                </div>
+                <button id="cancel" type="button" disabled>
+                  <svg class="icon" aria-hidden="true">
+                    <use href="#i-stop" /></svg
+                  >停止</button
+                ><button
+                  id="send"
+                  class="send-button"
+                  aria-label="发送"
+                  title="发送 · ⌘ Enter"
+                  disabled
+                >
+                  <svg class="icon" aria-hidden="true">
+                    <use href="#i-up" />
+                  </svg>
+                </button>
+              </div>
+            </form>
+            <div class="composer-footnote">
+              <span id="task-status" role="status"
+                >在你的设备上执行，随时由你掌控。</span
+              ><span class="keys">⌘ / Ctrl + Enter 发送</span>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+    <dialog id="connection-dialog" aria-labelledby="connection-title">
+      <div class="dialog-header">
+        <h2 id="connection-title">连接你的网关</h2>
+        <button
+          class="icon-button"
+          data-close="connection-dialog"
+          aria-label="关闭连接设置"
+        >
+          <svg class="icon" aria-hidden="true"><use href="#i-close" /></svg>
+        </button>
       </div>
-      <span class="tag" id="version">网关未连接</span>
-    </header>
-    <main class="shell">
-      <aside class="stack" style="align-content: start">
-        <section class="card stack">
-          <h2>连接网关</h2>
-          <form id="connect-form" class="stack">
-            <label
-              >访问令牌<input
+      <div class="dialog-content">
+        <p class="dialog-subtitle">
+          连接后，就能在这台设备上继续你的工作。<br /><span
+            id="connection-origin"
+          ></span>
+        </p>
+        <form id="connect-form">
+          <label
+            >访问令牌<span class="password-field"
+              ><input
                 id="token"
                 type="password"
                 autocomplete="off"
                 spellcheck="false"
                 required
-                placeholder="粘贴此网关的访问令牌"
-            /></label>
-            <div class="row">
-              <button class="primary" id="connect" type="submit">连接</button
-              ><button id="disconnect" type="button" disabled>
-                断开并清除
-              </button>
-            </div>
-          </form>
-          <small
-            >令牌只保存在当前标签页。请通过本机、HTTPS 或可信隧道连接。</small
-          >
-          <p id="status" class="notice" role="status" aria-live="polite">
-            输入访问令牌开始。
-          </p>
-        </section>
-        <section class="card stack">
-          <div class="row">
-            <h2>会话</h2>
-            <button id="refresh" disabled>刷新</button>
-          </div>
-          <div id="sessions"><p class="muted">连接后显示会话。</p></div>
-          <button id="more-sessions" hidden>加载更多会话</button>
-          <details id="new-session" open>
-            <summary>新建会话</summary>
-            <form id="create-form" class="form-fields">
-              <label
-                >名称<input
-                  id="title"
-                  maxlength="160"
-                  placeholder="例如：检查项目测试"
-              /></label>
-              <label>助手<select id="runtime" disabled></select></label>
-              <label>工作目录<select id="workspace" disabled></select></label>
-              <label>权限<select id="mode" disabled></select></label>
-              <label
-                >模型（可选）<input id="model" placeholder="使用助手默认模型"
-              /></label>
-              <small id="runtime-help"
-                >连接后检查助手是否已安装；账号授权需要通过实际任务验证。</small
+                placeholder="粘贴网关的访问令牌" /><button
+                class="icon-button"
+                id="show-token"
+                type="button"
+                aria-label="显示访问令牌"
               >
-              <button class="primary" id="create" disabled>创建会话</button>
-            </form>
-          </details>
-        </section>
-      </aside>
-      <section class="card chat">
-        <div class="chat-heading">
-          <h2 id="session-title">开始一次对话</h2>
-          <small id="session-info">选择已有会话，或创建一个新会话。</small>
-        </div>
-        <button id="more-history" hidden>加载更早的对话</button>
-        <div id="history" aria-live="polite">
-          <p class="empty">任务会在 Mac 或网关所在设备上执行。</p>
-        </div>
-        <div id="stream-preview" aria-live="polite"></div>
-        <div id="approvals"></div>
-        <form id="prompt-form" class="composer">
-          <label for="prompt">任务内容</label>
-          <textarea
-            id="prompt"
-            placeholder="描述你希望助手完成的任务…"
-            disabled
-            required
-          ></textarea>
-          <div class="row">
-            <small id="task-status" role="status">尚未选择会话</small
-            ><button id="cancel" type="button" class="danger" disabled>
-              停止任务</button
-            ><button id="send" class="primary" disabled>发送</button>
-          </div>
-          <small
-            >Ctrl / ⌘ + Enter
-            发送。默认只读；需要修改文件时请创建允许写入的会话。</small
+                <svg class="icon" aria-hidden="true">
+                  <use href="#i-eye" />
+                </svg></button></span
+            ><small>令牌只保存在当前标签页，断开连接后清除。</small></label
           >
+          <p id="connection-feedback" role="status"></p>
+          <div class="connection-actions">
+            <button id="disconnect" type="button" disabled>断开并清除</button
+            ><button class="primary" id="connect" type="submit">
+              连接网关
+            </button>
+          </div>
         </form>
-        <details>
-          <summary>连接事件</summary>
-          <pre id="events">暂无事件</pre>
-        </details>
-      </section>
-    </main>
-    <p class="footer">rcodex 开源网关 · 会话保存在网关设备上</p>
+        <div class="connection-meta">
+          <span>会话保存在你的网关设备上</span
+          ><span id="version">尚未连接</span>
+        </div>
+      </div>
+    </dialog>
+    <dialog id="new-session" aria-labelledby="create-title">
+      <div class="dialog-header">
+        <h2 id="create-title">新建对话</h2>
+        <button
+          class="icon-button"
+          data-close="new-session"
+          aria-label="关闭新建对话"
+        >
+          <svg class="icon" aria-hidden="true"><use href="#i-close" /></svg>
+        </button>
+      </div>
+      <div class="dialog-content">
+        <p class="dialog-subtitle">选好助手和工作目录，开始你的下一件事。</p>
+        <form id="create-form" class="form-fields">
+          <label
+            >对话名称<input
+              id="title"
+              maxlength="160"
+              placeholder="例如：为项目添加一个新功能"
+          /></label>
+          <div class="form-grid">
+            <label>助手<select id="runtime" disabled></select></label
+            ><label>权限<select id="mode" disabled></select></label>
+          </div>
+          <label>工作目录<select id="workspace" disabled></select></label>
+          <details class="advanced">
+            <summary>模型设置</summary>
+            <label
+              >模型（可选）<input id="model" placeholder="使用助手默认模型"
+            /></label>
+          </details>
+          <p id="runtime-help" class="dialog-footnote">
+            连接网关后即可选择助手。
+          </p>
+          <button class="primary" id="create" disabled>开始对话</button>
+        </form>
+      </div>
+    </dialog>
+    <dialog id="events-dialog" aria-labelledby="events-title">
+      <div class="dialog-header">
+        <h2 id="events-title">连接事件</h2>
+        <button
+          class="icon-button"
+          data-close="events-dialog"
+          aria-label="关闭连接事件"
+        >
+          <svg class="icon" aria-hidden="true"><use href="#i-close" /></svg>
+        </button>
+      </div>
+      <div class="dialog-content"><pre id="events">暂无事件</pre></div>
+    </dialog>
+    <template id="welcome-template"
+      ><div class="welcome">
+        <span class="app-icon"
+          ><svg class="icon" aria-hidden="true"><use href="#i-terminal" /></svg
+        ></span>
+        <h2>想做些什么？</h2>
+        <p class="welcome-description">
+          把想法变成下一步。<br />让 Codex 或 Claude Code 在你的设备上协助你。
+        </p>
+        <button class="primary welcome-action">连接网关</button>
+        <div class="suggestions">
+          <button
+            class="suggestion"
+            data-prompt="请梳理当前工作目录的项目结构，说明主要模块和入口文件，先不要修改文件。"
+          >
+            <svg class="icon" aria-hidden="true"><use href="#i-folder" /></svg
+            ><strong>了解一个项目</strong
+            ><small>从结构和关键代码开始</small></button
+          ><button
+            class="suggestion"
+            data-prompt="请检查当前项目的代码与测试，找出值得优先修复的问题，先给出分析和建议。"
+          >
+            <svg class="icon" aria-hidden="true"><use href="#i-code" /></svg
+            ><strong>检查代码质量</strong
+            ><small>发现问题，理清改进方向</small></button
+          ><button
+            class="suggestion"
+            data-prompt="请阅读当前项目的说明文件，提出接下来可以实现的功能，并给出分步实施计划。"
+          >
+            <svg class="icon" aria-hidden="true"><use href="#i-plan" /></svg
+            ><strong>规划下一步</strong><small>把需求整理成可执行的计划</small>
+          </button>
+        </div>
+      </div></template
+    >
     <script>
       "use strict";
       const $ = (id) => document.getElementById(id);
@@ -447,6 +1639,8 @@
         refreshAgain = false,
         sending = false,
         creating = false,
+        newAfterConnect = false,
+        draftPrompt = "",
         pendingAttempt = null;
       let eventLines = [],
         preview = "",
@@ -456,6 +1650,15 @@
       function status(message, error = false) {
         $("status").textContent = message;
         $("status").classList.toggle("error", error);
+        $("connection-feedback").textContent = message;
+        $("connection-feedback").classList.toggle("error", error);
+        if (error) {
+          clearTimeout(status.timer);
+          status.timer = setTimeout(
+            () => $("status").classList.remove("error"),
+            8000,
+          );
+        }
       }
       function elem(tag, text, cls) {
         const el = document.createElement(tag);
@@ -468,6 +1671,175 @@
           if (value) sessionStorage.setItem(storageKey, value);
           else sessionStorage.removeItem(storageKey);
         } catch {}
+      }
+      function icon(name) {
+        const svg = document.createElementNS(
+          "http://www.w3.org/2000/svg",
+          "svg",
+        );
+        svg.classList.add("icon");
+        svg.setAttribute("aria-hidden", "true");
+        const use = document.createElementNS(svg.namespaceURI, "use");
+        use.setAttribute("href", "#i-" + name);
+        svg.append(use);
+        return svg;
+      }
+      function closeSidebar() {
+        document.body.classList.remove("sidebar-open");
+        $("sidebar-toggle").setAttribute(
+          "aria-expanded",
+          String(
+            !matchMedia("(max-width: 760px)").matches &&
+              !document.body.classList.contains("sidebar-collapsed"),
+          ),
+        );
+      }
+      function openConnection() {
+        closeSidebar();
+        $("connection-dialog").showModal();
+        $("token").focus();
+      }
+      function openNewSession() {
+        if (!connected) {
+          newAfterConnect = true;
+          openConnection();
+          return;
+        }
+        closeSidebar();
+        $("new-session").showModal();
+        $("title").focus();
+      }
+      function renderWelcome() {
+        const welcome = $("welcome-template").content.cloneNode(true);
+        const button = welcome.querySelector(".welcome-action");
+        button.textContent = connected ? "新建对话" : "连接网关";
+        button.hidden = !!selected;
+        button.onclick = connected ? openNewSession : openConnection;
+        if (selected)
+          welcome.querySelector(".welcome-description").textContent =
+            "从一个问题开始，或者选择下面的任务。";
+        for (const suggestion of welcome.querySelectorAll(".suggestion"))
+          suggestion.onclick = () => {
+            if (selected && connected) {
+              $("prompt").value = suggestion.dataset.prompt;
+              $("prompt").focus();
+            } else {
+              draftPrompt = suggestion.dataset.prompt;
+              openNewSession();
+            }
+          };
+        $("history").replaceChildren(welcome);
+      }
+      // Build a small, safe Markdown subset entirely with DOM nodes. Model text
+      // never becomes HTML, and links only permit HTTP(S) destinations.
+      function inlineMarkdown(target, text) {
+        const pattern =
+          /(`[^`\n]+`|\*\*[^*\n]+\*\*|\[[^\]\n]+\]\(https?:\/\/[^\s)]+\))/g;
+        let offset = 0;
+        for (const match of text.matchAll(pattern)) {
+          target.append(
+            document.createTextNode(text.slice(offset, match.index)),
+          );
+          const value = match[0];
+          if (value.startsWith("`"))
+            target.append(elem("code", value.slice(1, -1)));
+          else if (value.startsWith("**"))
+            target.append(elem("strong", value.slice(2, -2)));
+          else {
+            const parts = /^\[([^\]]+)\]\(([^)]+)\)$/.exec(value);
+            const link = elem("a", parts[1]);
+            link.href = parts[2];
+            link.target = "_blank";
+            link.rel = "noopener noreferrer";
+            target.append(link);
+          }
+          offset = match.index + value.length;
+        }
+        target.append(document.createTextNode(text.slice(offset)));
+      }
+      function renderMarkdown(target, text) {
+        const lines = String(text).replace(/\r\n/g, "\n").split("\n");
+        let paragraph = [],
+          list = null;
+        const flush = () => {
+          if (paragraph.length) {
+            const p = elem("p");
+            inlineMarkdown(p, paragraph.join("\n"));
+            target.append(p);
+            paragraph = [];
+          }
+          list = null;
+        };
+        for (let index = 0; index < lines.length; index++) {
+          const line = lines[index];
+          const fence = /^\s*```([^`]*)$/.exec(line);
+          if (fence) {
+            flush();
+            const content = [];
+            while (++index < lines.length && !/^\s*```\s*$/.test(lines[index]))
+              content.push(lines[index]);
+            const value = content.join("\n");
+            const block = elem("div", undefined, "code-block");
+            const heading = elem("div", undefined, "code-heading");
+            const copy = elem("button", undefined, "code-copy");
+            copy.type = "button";
+            copy.setAttribute("aria-label", "复制代码");
+            copy.append(icon("copy"), document.createTextNode("复制"));
+            copy.onclick = async () => {
+              try {
+                await navigator.clipboard.writeText(value);
+                copy.replaceChildren(
+                  icon("check"),
+                  document.createTextNode("已复制"),
+                );
+                setTimeout(
+                  () =>
+                    copy.replaceChildren(
+                      icon("copy"),
+                      document.createTextNode("复制"),
+                    ),
+                  1800,
+                );
+              } catch {
+                status("无法访问剪贴板，请选择代码后手动复制。", true);
+              }
+            };
+            heading.append(elem("span", fence[1].trim() || "代码"), copy);
+            const pre = elem("pre");
+            pre.append(elem("code", value));
+            block.append(heading, pre);
+            target.append(block);
+            continue;
+          }
+          const heading = /^(#{1,6})\s+(.+)$/.exec(line);
+          if (heading) {
+            flush();
+            const h = elem("h" + Math.min(heading[1].length + 1, 4));
+            inlineMarkdown(h, heading[2]);
+            target.append(h);
+            continue;
+          }
+          const item = /^\s*(?:([-*+])|\d+[.)])\s+(.+)$/.exec(line);
+          if (item) {
+            const tag = item[1] ? "UL" : "OL";
+            if (paragraph.length || !list || list.tagName !== tag) {
+              flush();
+              list = elem(tag.toLowerCase());
+              target.append(list);
+            }
+            const li = elem("li");
+            inlineMarkdown(li, item[2]);
+            list.append(li);
+            continue;
+          }
+          if (!line.trim()) {
+            flush();
+            continue;
+          }
+          list = null;
+          paragraph.push(line);
+        }
+        flush();
       }
       async function api(path, options = {}) {
         const controller = new AbortController();
@@ -507,11 +1879,21 @@
         $("create").disabled = !connected || !$("runtime").value || creating;
         $("refresh").disabled = !connected;
         $("disconnect").disabled = !connected;
+        document.body.classList.toggle("connected", connected);
+        $("connection-label").textContent = connected
+          ? "网关已连接"
+          : "连接网关";
+        $("gateway-host").textContent = location.host;
+        $("composer-context").textContent = selected
+          ? (selected.runtime === "claude" ? "Claude Code" : "Codex") +
+            " · " +
+            (modes[selected.mode]?.split(" · ")[0] || selected.mode)
+          : "选择会话开始";
         $("task-status").textContent = busyTurn
           ? states[busyTurn.state] || busyTurn.state
           : selected
-            ? "可以发送新任务"
-            : "尚未选择会话";
+            ? "在你的设备上执行，随时由你掌控。"
+            : "连接你的设备，开始一次对话。";
       }
       function stopWatch() {
         selection++;
@@ -536,38 +1918,62 @@
         sessions = [];
         turns = [];
         renderSessions();
-        $("history").replaceChildren(elem("p", "已断开连接。", "empty"));
+        renderWelcome();
         $("approvals").replaceChildren();
         $("stream-preview").textContent = "";
-        $("session-title").textContent = "开始一次对话";
-        $("session-info").textContent = "选择已有会话，或创建一个新会话。";
+        $("session-title").textContent = "工作空间";
+        $("session-info").textContent = "Codex 与 Claude Code，随时继续。";
+        $("session-mode").textContent = "为专注而设计";
         $("version").textContent = "网关未连接";
         $("more-history").hidden = true;
         $("more-sessions").hidden = true;
         controls();
+        $("connection-dialog").close();
         status("已清除当前标签页的令牌。");
       }
       function renderSessions() {
         const list = $("sessions");
         list.replaceChildren();
-        for (const s of sessions) {
+        const query = $("search").value.trim().toLocaleLowerCase();
+        const visible = sessions.filter((s) =>
+          (s.title + " " + s.runtime + " " + s.workspace)
+            .toLocaleLowerCase()
+            .includes(query),
+        );
+        for (const s of visible) {
           const button = elem(
             "button",
             undefined,
             "session" + (selected?.id === s.id ? " active" : ""),
           );
           button.append(
+            icon("message"),
             elem("strong", s.title || "未命名会话"),
             elem(
               "small",
-              s.runtime + " · " + (modes[s.mode]?.split(" · ")[0] || s.mode),
+              (s.runtime === "claude" ? "Claude Code" : "Codex") +
+                " · " +
+                (modes[s.mode]?.split(" · ")[0] || s.mode),
             ),
           );
+          button.title = s.title || "未命名会话";
+          if (selected?.id === s.id)
+            button.setAttribute("aria-current", "page");
           button.onclick = () => selectSession(s);
           list.append(button);
         }
-        if (!sessions.length)
-          list.append(elem("p", "暂无会话，创建一个开始。", "muted"));
+        if (!visible.length)
+          list.append(
+            elem(
+              "p",
+              query
+                ? "没有找到匹配的对话"
+                : connected
+                  ? "你的对话会出现在这里。"
+                  : "连接网关后，你的对话将在这里同步。",
+              "sidebar-empty",
+            ),
+          );
         $("more-sessions").hidden = !sessionCursor;
       }
       async function loadSessions(more = false) {
@@ -600,6 +2006,7 @@
           if (epoch !== connection) return;
           connected = true;
           remember(value);
+          $("connection-dialog").close();
           for (const id of ["runtime", "workspace", "mode"]) {
             $(id).replaceChildren();
             $(id).disabled = false;
@@ -636,6 +2043,11 @@
             })
             .catch(() => {});
           if (sessions.length) await selectSession(sessions[0]);
+          else renderWelcome();
+          if (newAfterConnect) {
+            newAfterConnect = false;
+            openNewSession();
+          }
         } catch (error) {
           if (epoch === connection) {
             connected = false;
@@ -657,26 +2069,44 @@
         box.replaceChildren();
         for (const turn of [...turns].reverse()) {
           const article = elem("article", undefined, "turn");
-          article.append(
-            elem("div", turn.prompt, "bubble"),
+          const label = elem("div", undefined, "assistant-label");
+          const mark = elem("span", undefined, "assistant-mark");
+          mark.append(icon("terminal"));
+          label.append(
+            mark,
             elem(
-              "div",
-              turn.result ||
-                turn.error ||
-                (active(turn) ? "等待助手回复…" : "此任务没有文本回复。"),
-              "bubble answer",
+              "span",
+              selected?.runtime === "claude" ? "Claude Code" : "Codex",
             ),
-            elem(
-              "div",
+          );
+          const answer = elem("div", undefined, "bubble answer");
+          renderMarkdown(
+            answer,
+            turn.result ||
+              turn.error ||
+              (active(turn) ? "正在思考…" : "此任务没有文本回复。"),
+          );
+          const state = elem(
+            "div",
+            undefined,
+            "turn-state" + (turn.state === "failed" ? " failed" : ""),
+          );
+          if (turn.state === "completed") state.append(icon("check"));
+          state.append(
+            document.createTextNode(
               (states[turn.state] || turn.state) +
                 (turn.error && turn.result ? " · " + turn.error : ""),
-              "turn-state",
             ),
+          );
+          article.append(
+            elem("div", turn.prompt, "bubble user-message"),
+            label,
+            answer,
+            state,
           );
           box.append(article);
         }
-        if (!turns.length)
-          box.append(elem("p", "会话已就绪，发送第一条任务。", "empty"));
+        if (!turns.length) renderWelcome();
         if (nearBottom) box.scrollTop = box.scrollHeight;
         controls();
         if (!busyTurn) {
@@ -848,8 +2278,7 @@
         stopWatch();
         const epoch = selection;
         selected = session;
-        if (matchMedia("(max-width: 760px)").matches)
-          $("new-session").open = false;
+        closeSidebar();
         turns = [];
         historyCursor = 0;
         historySignature = "";
@@ -861,11 +2290,14 @@
         $("approvals").replaceChildren();
         $("session-title").textContent = session.title || "未命名会话";
         $("session-info").textContent =
-          session.runtime +
+          (session.runtime === "claude" ? "Claude Code" : "Codex") +
           " · " +
-          (modes[session.mode] || session.mode) +
-          " · " +
-          session.workspace;
+          (session.workspace.split(/[\\/]/).filter(Boolean).pop() ||
+            session.workspace);
+        $("session-info").title = session.workspace;
+        $("session-mode").textContent =
+          modes[session.mode]?.split(" · ")[0] || session.mode;
+        $("session-mode").title = modes[session.mode] || session.mode;
         renderSessions();
         renderHistory();
         await refreshView(epoch);
@@ -942,6 +2374,73 @@
         }
       }
       $("connect-form").onsubmit = establish;
+      $("connection-settings").onclick = openConnection;
+      $("new-conversation").onclick = openNewSession;
+      $("search").oninput = renderSessions;
+      $("events-toggle").onclick = () => $("events-dialog").showModal();
+      $("connection-origin").textContent = location.host;
+      $("show-token").onclick = () => {
+        $("token").type = $("token").type === "password" ? "text" : "password";
+        $("show-token").setAttribute(
+          "aria-label",
+          $("token").type === "password" ? "显示访问令牌" : "隐藏访问令牌",
+        );
+      };
+      for (const button of document.querySelectorAll("[data-close]"))
+        button.onclick = () => $(button.dataset.close).close();
+      $("sidebar-toggle").onclick = () => {
+        const mobile = matchMedia("(max-width: 760px)").matches;
+        document.body.classList.toggle(
+          mobile ? "sidebar-open" : "sidebar-collapsed",
+        );
+        $("sidebar-toggle").setAttribute(
+          "aria-expanded",
+          String(
+            mobile
+              ? document.body.classList.contains("sidebar-open")
+              : !document.body.classList.contains("sidebar-collapsed"),
+          ),
+        );
+      };
+      $("sidebar-overlay").onclick = closeSidebar;
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") closeSidebar();
+      });
+      function setTheme(dark, rememberTheme = false) {
+        document.documentElement.dataset.theme = dark ? "dark" : "light";
+        $("theme-toggle").replaceChildren(icon(dark ? "sun" : "moon"));
+        const label = dark ? "切换浅色模式" : "切换深色模式";
+        $("theme-toggle").setAttribute("aria-label", label);
+        $("theme-toggle").title = label;
+        document.querySelector('meta[name="theme-color"]').content = dark
+          ? "#1c1c1e"
+          : "#f5f5f7";
+        if (rememberTheme)
+          try {
+            localStorage.setItem("rcgTheme", dark ? "dark" : "light");
+          } catch {}
+      }
+      $("theme-toggle").onclick = () =>
+        setTheme(document.documentElement.dataset.theme !== "dark", true);
+      let savedTheme;
+      try {
+        savedTheme = localStorage.getItem("rcgTheme");
+      } catch {}
+      setTheme(
+        savedTheme
+          ? savedTheme === "dark"
+          : matchMedia("(prefers-color-scheme: dark)").matches,
+      );
+      matchMedia("(prefers-color-scheme: dark)").addEventListener(
+        "change",
+        (event) => {
+          let manual;
+          try {
+            manual = localStorage.getItem("rcgTheme");
+          } catch {}
+          if (!manual) setTheme(event.matches);
+        },
+      );
       $("disconnect").onclick = disconnect;
       $("refresh").onclick = () =>
         loadSessions().catch((error) => status(error.message, true));
@@ -1000,7 +2499,12 @@
           await loadSessions();
           if (epoch !== connection || !connected) return;
           await selectSession(data.session);
+          $("new-session").close();
           $("title").value = "";
+          if (draftPrompt) {
+            $("prompt").value = draftPrompt;
+            draftPrompt = "";
+          }
           $("prompt").focus();
           status("会话已创建。");
         } catch (error) {
@@ -1074,7 +2578,7 @@
       };
       window.addEventListener("pagehide", stopWatch);
       matchMedia("(max-width: 760px)").addEventListener("change", (event) => {
-        if (event.matches && selected) $("new-session").open = false;
+        closeSidebar();
       });
       try {
         $("token").value = sessionStorage.getItem(storageKey) || "";
@@ -1090,6 +2594,10 @@
         if (consumeTokenFragment()) establish();
       });
       consumeTokenFragment();
+      renderWelcome();
+      renderSessions();
+      controls();
+      closeSidebar();
       if ($("token").value) establish();
     </script>
   </body>

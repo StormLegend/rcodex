@@ -7,13 +7,14 @@ import os
 from pathlib import Path
 import subprocess
 import sys
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--config', type=Path, required=True)
     parser.add_argument('--copy-token', action='store_true', help='Copy access token to clipboard instead of opening the console')
+    parser.add_argument('--url', help='Open this explicitly selected HTTPS gateway origin instead of the local listener')
     args = parser.parse_args()
     config = json.loads(os.path.expandvars(args.config.expanduser().read_text()))
     host, port = config['listen'].rsplit(':', 1)
@@ -28,10 +29,18 @@ def main():
         print('Access token copied to clipboard.')
         return
     scheme = 'https' if config.get('tls_cert') else 'http'
-    url = f'{scheme}://{host}:{int(port)}/console#token={quote(token, safe="")}'
+    origin = f'{scheme}://{host}:{int(port)}'
+    if args.url:
+        remote = urlsplit(args.url)
+        if remote.scheme != 'https' or not remote.hostname or remote.username or remote.password or remote.query or remote.fragment or remote.path not in ('', '/'):
+            raise ValueError('--url must be an HTTPS origin without credentials, path, query or fragment.')
+        origin = f'https://{remote.netloc}'
+    url = f'{origin}/console#token={quote(token, safe="")}'
     # /console removes the fragment immediately and keeps auth in sessionStorage.
-    subprocess.run(['/usr/bin/open', url], check=True)
-    print(f'Opened {scheme}://{host}:{int(port)}/console')
+    # Pass the URL on stdin so the bearer token never appears in process argv.
+    quoted_url = url.replace('\\', '\\\\').replace('"', '\\"')
+    subprocess.run(['/usr/bin/osascript', '-'], input=f'open location "{quoted_url}"\n'.encode(), check=True)
+    print(f'Opened {origin}/console')
 
 
 if __name__ == '__main__':
