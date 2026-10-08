@@ -1,18 +1,1096 @@
 <!doctype html>
 <html lang="zh-CN">
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>rcodex-go</title>
-<style>body{font:14px system-ui;margin:2rem;max-width:1100px}button,input{padding:.45rem;margin:.2rem}pre{background:#111;color:#ddd;padding:1rem;white-space:pre-wrap;max-height:60vh;overflow:auto}.row{border-bottom:1px solid #ddd;padding:.5rem}.muted{color:#666}</style>
-<h1>rcodex-go 控制台</h1>
-<label>API Token <input id="token" type="password" size="48"><button onclick="save()">保存</button></label>
-<p><button onclick="loadSessions()">刷新会话</button> <span id="status" class="muted"></span></p>
-<div id="sessions"></div><h2>实时事件</h2><pre id="events">选择会话后显示事件</pre>
-<script>
-const token=()=>document.querySelector('#token').value||localStorage.rcgToken||'';
-document.querySelector('#token').value=localStorage.rcgToken||'';
-function save(){localStorage.rcgToken=document.querySelector('#token').value;loadSessions()}
-async function api(path,opts={}){opts.headers={...(opts.headers||{}),Authorization:'Bearer '+token()};let r=await fetch(path,opts);if(!r.ok)throw Error(r.status+' '+await r.text());return r.json()}
-async function loadSessions(){try{let x=await api('/api/sessions');document.querySelector('#status').textContent=x.sessions.length+' 个会话';document.querySelector('#sessions').innerHTML=x.sessions.map(s=>`<div class="row"><b>${esc(s.title||s.id)}</b> <span class="muted">${s.runtime} · ${s.mode} · ${s.workspace}</span> <button onclick="watch('${s.id}')">查看</button></div>`).join('')}catch(e){document.querySelector('#status').textContent=e.message}}
-let watching=0;async function watch(id){let run=++watching;document.querySelector('#events').textContent='';try{let r=await fetch('/api/sessions/'+id+'/events/stream?after=0',{headers:{Authorization:'Bearer '+token()}});if(!r.ok)throw Error(r.status);let reader=r.body.getReader(),dec=new TextDecoder(),buf='';while(run===watching){let x=await reader.read();if(x.done)break;buf+=dec.decode(x.value,{stream:true});let parts=buf.split('\n\n');buf=parts.pop();for(let p of parts){let line=p.split('\n').find(x=>x.startsWith('data: '));if(line){document.querySelector('#events').textContent+=line.slice(6)+'\n';let el=document.querySelector('#events');el.scrollTop=el.scrollHeight}}}}catch(e){if(run===watching)document.querySelector('#status').textContent='事件流已断开: '+e.message}}
-function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
-</script>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="referrer" content="no-referrer" />
+    <title>rcodex · 控制台</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #172438;
+        --muted: #58677b;
+        --line: #dce3ed;
+        --accent: #235bcc;
+        --bg: #f4f7fb;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font:
+          15px/1.55 system-ui,
+          -apple-system,
+          sans-serif;
+      }
+      button,
+      input,
+      select,
+      textarea {
+        font: inherit;
+      }
+      button,
+      input,
+      select,
+      textarea {
+        border: 1px solid var(--line);
+        border-radius: 9px;
+        padding: 10px 12px;
+      }
+      input,
+      select,
+      textarea {
+        background: #fff;
+        color: var(--ink);
+        min-width: 0;
+        width: 100%;
+      }
+      button {
+        cursor: pointer;
+        background: #fff;
+        color: var(--ink);
+        min-height: 44px;
+      }
+      button:hover {
+        border-color: var(--accent);
+      }
+      button:disabled {
+        opacity: 0.5;
+        cursor: default;
+      }
+      .primary {
+        background: var(--accent);
+        color: #fff;
+        border-color: var(--accent);
+      }
+      .danger {
+        color: #aa2532;
+      }
+      .muted,
+      small {
+        color: var(--muted);
+      }
+      h1,
+      h2,
+      p {
+        margin: 0;
+      }
+      h1 {
+        font-size: 23px;
+        letter-spacing: -0.7px;
+      }
+      h2 {
+        font-size: 17px;
+      }
+      header {
+        background: #fff;
+        border-bottom: 1px solid var(--line);
+        padding: 20px 28px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+      }
+      .tag {
+        font-size: 12px;
+        border-radius: 20px;
+        background: #edf2fa;
+        padding: 5px 10px;
+      }
+      .shell {
+        max-width: 1400px;
+        margin: auto;
+        padding: 22px;
+        display: grid;
+        grid-template-columns: 320px minmax(0, 1fr);
+        gap: 20px;
+      }
+      .card {
+        background: #fff;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 20px;
+      }
+      .stack {
+        display: grid;
+        gap: 14px;
+      }
+      .row {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+      .row > * {
+        flex: 1;
+      }
+      .row > button {
+        flex: 0 0 auto;
+      }
+      label {
+        display: grid;
+        gap: 5px;
+        font-size: 13px;
+        font-weight: 600;
+      }
+      .notice {
+        font-size: 13px;
+        overflow-wrap: anywhere;
+        padding-top: 8px;
+      }
+      .error {
+        color: #aa2532;
+      }
+      #sessions {
+        display: grid;
+        grid-auto-rows: min-content;
+        align-content: start;
+        gap: 7px;
+        max-height: 380px;
+        overflow: auto;
+      }
+      .session {
+        min-height: 72px;
+        text-align: left;
+        width: 100%;
+        display: grid;
+        gap: 3px;
+        overflow-wrap: anywhere;
+      }
+      .session.active {
+        border-color: var(--accent);
+        background: #eef4ff;
+      }
+      .session small {
+        font-size: 12px;
+      }
+      summary {
+        cursor: pointer;
+        font-weight: 600;
+        min-height: 32px;
+      }
+      .form-fields {
+        padding-top: 14px;
+        display: grid;
+        gap: 12px;
+      }
+      .chat {
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+      }
+      .chat-heading {
+        border-bottom: 1px solid var(--line);
+        padding-bottom: 14px;
+        overflow-wrap: anywhere;
+      }
+      #history {
+        min-height: 200px;
+        max-height: 60vh;
+        overflow: auto;
+        display: grid;
+        align-content: start;
+        gap: 18px;
+        scroll-behavior: smooth;
+      }
+      .empty {
+        padding: 38px 15px;
+        text-align: center;
+        color: var(--muted);
+      }
+      .turn {
+        display: grid;
+        gap: 8px;
+        min-width: 0;
+      }
+      .bubble {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        padding: 13px 15px;
+        border-radius: 12px;
+        background: #f1f5fc;
+      }
+      .answer {
+        background: #f7f8fa;
+      }
+      .turn-state {
+        font-size: 12px;
+        color: var(--muted);
+      }
+      textarea {
+        resize: vertical;
+        min-height: 110px;
+      }
+      .composer {
+        display: grid;
+        gap: 10px;
+        padding-top: 14px;
+        border-top: 1px solid var(--line);
+      }
+      .composer .row {
+        justify-content: space-between;
+      }
+      .composer small {
+        flex: 1;
+      }
+      #stream-preview {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        max-height: 240px;
+        overflow: auto;
+        font-size: 14px;
+      }
+      #approvals:empty,
+      #stream-preview:empty {
+        display: none;
+      }
+      .approval {
+        border: 1px solid #e9c379;
+        border-radius: 10px;
+        padding: 14px;
+        background: #fffbf2;
+        margin-bottom: 10px;
+      }
+      .approval pre {
+        font-size: 12px;
+        max-height: 180px;
+        overflow: auto;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      #events {
+        font-size: 12px;
+        max-height: 220px;
+        overflow: auto;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      .footer {
+        font-size: 12px;
+        color: var(--muted);
+        text-align: center;
+        padding: 0 20px 20px;
+      }
+      [hidden] {
+        display: none !important;
+      }
+      @media (max-width: 760px) {
+        header {
+          padding: 16px;
+        }
+        .shell {
+          grid-template-columns: 1fr;
+          padding: 12px;
+          gap: 12px;
+        }
+        .card {
+          padding: 16px;
+        }
+        #sessions {
+          max-height: 200px;
+        }
+        #history {
+          max-height: 55vh;
+        }
+        header .tag {
+          font-size: 11px;
+        }
+        .row {
+          gap: 8px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div>
+        <h1>rcodex <span class="muted">控制台</span></h1>
+        <small>在你的设备上继续工作</small>
+      </div>
+      <span class="tag" id="version">网关未连接</span>
+    </header>
+    <main class="shell">
+      <aside class="stack" style="align-content: start">
+        <section class="card stack">
+          <h2>连接网关</h2>
+          <form id="connect-form" class="stack">
+            <label
+              >访问令牌<input
+                id="token"
+                type="password"
+                autocomplete="off"
+                spellcheck="false"
+                required
+                placeholder="粘贴此网关的访问令牌"
+            /></label>
+            <div class="row">
+              <button class="primary" id="connect" type="submit">连接</button
+              ><button id="disconnect" type="button" disabled>
+                断开并清除
+              </button>
+            </div>
+          </form>
+          <small
+            >令牌只保存在当前标签页。请通过本机、HTTPS 或可信隧道连接。</small
+          >
+          <p id="status" class="notice" role="status" aria-live="polite">
+            输入访问令牌开始。
+          </p>
+        </section>
+        <section class="card stack">
+          <div class="row">
+            <h2>会话</h2>
+            <button id="refresh" disabled>刷新</button>
+          </div>
+          <div id="sessions"><p class="muted">连接后显示会话。</p></div>
+          <button id="more-sessions" hidden>加载更多会话</button>
+          <details id="new-session" open>
+            <summary>新建会话</summary>
+            <form id="create-form" class="form-fields">
+              <label
+                >名称<input
+                  id="title"
+                  maxlength="160"
+                  placeholder="例如：检查项目测试"
+              /></label>
+              <label>助手<select id="runtime" disabled></select></label>
+              <label>工作目录<select id="workspace" disabled></select></label>
+              <label>权限<select id="mode" disabled></select></label>
+              <label
+                >模型（可选）<input id="model" placeholder="使用助手默认模型"
+              /></label>
+              <small id="runtime-help"
+                >连接后检查助手是否已安装；账号授权需要通过实际任务验证。</small
+              >
+              <button class="primary" id="create" disabled>创建会话</button>
+            </form>
+          </details>
+        </section>
+      </aside>
+      <section class="card chat">
+        <div class="chat-heading">
+          <h2 id="session-title">开始一次对话</h2>
+          <small id="session-info">选择已有会话，或创建一个新会话。</small>
+        </div>
+        <button id="more-history" hidden>加载更早的对话</button>
+        <div id="history" aria-live="polite">
+          <p class="empty">任务会在 Mac 或网关所在设备上执行。</p>
+        </div>
+        <div id="stream-preview" aria-live="polite"></div>
+        <div id="approvals"></div>
+        <form id="prompt-form" class="composer">
+          <label for="prompt">任务内容</label>
+          <textarea
+            id="prompt"
+            placeholder="描述你希望助手完成的任务…"
+            disabled
+            required
+          ></textarea>
+          <div class="row">
+            <small id="task-status" role="status">尚未选择会话</small
+            ><button id="cancel" type="button" class="danger" disabled>
+              停止任务</button
+            ><button id="send" class="primary" disabled>发送</button>
+          </div>
+          <small
+            >Ctrl / ⌘ + Enter
+            发送。默认只读；需要修改文件时请创建允许写入的会话。</small
+          >
+        </form>
+        <details>
+          <summary>连接事件</summary>
+          <pre id="events">暂无事件</pre>
+        </details>
+      </section>
+    </main>
+    <p class="footer">rcodex 开源网关 · 会话保存在网关设备上</p>
+    <script>
+      "use strict";
+      const $ = (id) => document.getElementById(id);
+      const mount = location.pathname
+        .replace(/\/console\/?$/, "")
+        .replace(/\/$/, "");
+      const storageKey = "rcgToken:" + mount;
+      const states = {
+        queued: "等待执行",
+        running: "正在执行",
+        completed: "已完成",
+        failed: "执行失败",
+        cancelled: "已停止",
+        interrupted: "网关重启，任务已中断",
+        timed_out: "执行超时",
+      };
+      const modes = {
+        readonly: "只读 · 查看与分析",
+        ask: "审批 · 写入工作目录，敏感操作需确认",
+        auto: "自动 · 允许修改工作目录",
+        full: "完整访问 · 无沙箱限制",
+      };
+      let credential = "",
+        connected = false,
+        selected = null,
+        sessions = [],
+        turns = [],
+        sessionCursor = 0,
+        historyCursor = 0;
+      let streamController = null,
+        streamTimer = null,
+        pollTimer = null,
+        refreshTimer = null,
+        selection = 0,
+        connection = 0,
+        refreshing = false,
+        refreshAgain = false,
+        sending = false,
+        creating = false,
+        pendingAttempt = null;
+      let eventLines = [],
+        preview = "",
+        busyTurn = null,
+        historySignature = "",
+        approvalSignature = "";
+      function status(message, error = false) {
+        $("status").textContent = message;
+        $("status").classList.toggle("error", error);
+      }
+      function elem(tag, text, cls) {
+        const el = document.createElement(tag);
+        if (text !== undefined) el.textContent = text;
+        if (cls) el.className = cls;
+        return el;
+      }
+      function remember(value) {
+        try {
+          if (value) sessionStorage.setItem(storageKey, value);
+          else sessionStorage.removeItem(storageKey);
+        } catch {}
+      }
+      async function api(path, options = {}) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 20000);
+        try {
+          const response = await fetch(mount + path, {
+            ...options,
+            signal: controller.signal,
+            cache: "no-store",
+            headers: {
+              Authorization: "Bearer " + credential,
+              ...(options.body ? { "Content-Type": "application/json" } : {}),
+              ...options.headers,
+            },
+          });
+          if (!response.ok) {
+            const body = await response.text();
+            throw Error(
+              response.status === 401
+                ? "访问令牌无效，或当前令牌没有操作权限。"
+                : response.status + " " + body.slice(0, 350),
+            );
+          }
+          return await response.json();
+        } finally {
+          clearTimeout(timer);
+        }
+      }
+      function active(turn) {
+        return turn.state === "queued" || turn.state === "running";
+      }
+      function controls() {
+        busyTurn = turns.find(active) || null;
+        $("prompt").disabled = !connected || !selected;
+        $("send").disabled = !connected || !selected || !!busyTurn || sending;
+        $("cancel").disabled = !connected || !busyTurn;
+        $("create").disabled = !connected || !$("runtime").value || creating;
+        $("refresh").disabled = !connected;
+        $("disconnect").disabled = !connected;
+        $("task-status").textContent = busyTurn
+          ? states[busyTurn.state] || busyTurn.state
+          : selected
+            ? "可以发送新任务"
+            : "尚未选择会话";
+      }
+      function stopWatch() {
+        selection++;
+        clearTimeout(streamTimer);
+        clearTimeout(pollTimer);
+        clearTimeout(refreshTimer);
+        refreshTimer = null;
+        streamController?.abort();
+        streamController = null;
+        refreshing = false;
+        refreshAgain = false;
+      }
+      function disconnect() {
+        connection++;
+        stopWatch();
+        connected = false;
+        credential = "";
+        remember("");
+        $("token").value = "";
+        $("connect").disabled = false;
+        selected = null;
+        sessions = [];
+        turns = [];
+        renderSessions();
+        $("history").replaceChildren(elem("p", "已断开连接。", "empty"));
+        $("approvals").replaceChildren();
+        $("stream-preview").textContent = "";
+        $("session-title").textContent = "开始一次对话";
+        $("session-info").textContent = "选择已有会话，或创建一个新会话。";
+        $("version").textContent = "网关未连接";
+        $("more-history").hidden = true;
+        $("more-sessions").hidden = true;
+        controls();
+        status("已清除当前标签页的令牌。");
+      }
+      function renderSessions() {
+        const list = $("sessions");
+        list.replaceChildren();
+        for (const s of sessions) {
+          const button = elem(
+            "button",
+            undefined,
+            "session" + (selected?.id === s.id ? " active" : ""),
+          );
+          button.append(
+            elem("strong", s.title || "未命名会话"),
+            elem(
+              "small",
+              s.runtime + " · " + (modes[s.mode]?.split(" · ")[0] || s.mode),
+            ),
+          );
+          button.onclick = () => selectSession(s);
+          list.append(button);
+        }
+        if (!sessions.length)
+          list.append(elem("p", "暂无会话，创建一个开始。", "muted"));
+        $("more-sessions").hidden = !sessionCursor;
+      }
+      async function loadSessions(more = false) {
+        const epoch = connection;
+        const data = await api(
+          "/api/sessions?limit=100" + (more ? "&before=" + sessionCursor : ""),
+        );
+        if (epoch !== connection || !connected) return;
+        sessions = more
+          ? [...sessions, ...(data.sessions || [])]
+          : data.sessions || [];
+        sessionCursor = data.next_before || 0;
+        renderSessions();
+      }
+      async function establish(event) {
+        event?.preventDefault();
+        const value = $("token").value.trim();
+        if (!value) return;
+        stopWatch();
+        const epoch = ++connection;
+        credential = value;
+        connected = false;
+        selected = null;
+        turns = [];
+        controls();
+        $("connect").disabled = true;
+        status("正在连接…");
+        try {
+          const info = await api("/api/runtime/status");
+          if (epoch !== connection) return;
+          connected = true;
+          remember(value);
+          for (const id of ["runtime", "workspace", "mode"]) {
+            $(id).replaceChildren();
+            $(id).disabled = false;
+          }
+          for (const runtime of info.runtimes) {
+            const option = new Option(
+              runtime.name + (runtime.available ? "" : "（未安装）"),
+              runtime.id,
+            );
+            option.disabled = !runtime.available;
+            $("runtime").append(option);
+          }
+          $("runtime").value = info.runtimes.find((r) => r.available)?.id || "";
+          for (const root of info.workspaces)
+            $("workspace").append(new Option(root, root));
+          for (const mode of info.modes)
+            $("mode").append(new Option(modes[mode] || mode, mode));
+          $("mode").value = "readonly";
+          $("runtime-help").textContent =
+            "已安装：" +
+            (info.runtimes
+              .filter((r) => r.available)
+              .map((r) => r.name)
+              .join("、") || "暂无") +
+            "。首次发送任务会验证账号授权。";
+          await loadSessions();
+          if (epoch !== connection) return;
+          status("已连接。选择会话或创建新任务。");
+          controls();
+          api("/healthz")
+            .then((h) => {
+              if (epoch === connection)
+                $("version").textContent = h.version || "网关已连接";
+            })
+            .catch(() => {});
+          if (sessions.length) await selectSession(sessions[0]);
+        } catch (error) {
+          if (epoch === connection) {
+            connected = false;
+            remember("");
+            controls();
+            status(error.message, true);
+          }
+        } finally {
+          if (epoch === connection) $("connect").disabled = false;
+        }
+      }
+      function renderHistory() {
+        const signature = JSON.stringify(turns);
+        if (signature === historySignature) return;
+        historySignature = signature;
+        const box = $("history");
+        const nearBottom =
+          box.scrollHeight - box.scrollTop - box.clientHeight < 100;
+        box.replaceChildren();
+        for (const turn of [...turns].reverse()) {
+          const article = elem("article", undefined, "turn");
+          article.append(
+            elem("div", turn.prompt, "bubble"),
+            elem(
+              "div",
+              turn.result ||
+                turn.error ||
+                (active(turn) ? "等待助手回复…" : "此任务没有文本回复。"),
+              "bubble answer",
+            ),
+            elem(
+              "div",
+              (states[turn.state] || turn.state) +
+                (turn.error && turn.result ? " · " + turn.error : ""),
+              "turn-state",
+            ),
+          );
+          box.append(article);
+        }
+        if (!turns.length)
+          box.append(elem("p", "会话已就绪，发送第一条任务。", "empty"));
+        if (nearBottom) box.scrollTop = box.scrollHeight;
+        controls();
+        if (!busyTurn) {
+          preview = "";
+          $("stream-preview").textContent = "";
+        }
+      }
+      function renderApprovals(items) {
+        const relevant = items.filter((a) => a.session_id === selected?.id);
+        const signature = JSON.stringify(relevant);
+        if (signature === approvalSignature) return;
+        approvalSignature = signature;
+        $("approvals").replaceChildren();
+        for (const approval of relevant) {
+          const box = elem("section", undefined, "approval");
+          const request = approval.request || {};
+          const params = request.params || {};
+          const isQuestion = request.kind === "question";
+          box.append(
+            elem(
+              "strong",
+              isQuestion ? "助手需要你的回答" : "助手正在等待你的确认",
+            ),
+          );
+          if (params.reason) box.append(elem("p", params.reason));
+          if (params.command)
+            box.append(
+              elem(
+                "pre",
+                typeof params.command === "string"
+                  ? params.command
+                  : JSON.stringify(params.command),
+              ),
+            );
+          const answerFields = [];
+          if (isQuestion) {
+            for (const question of params.questions || []) {
+              const label = elem(
+                "label",
+                question.question || question.header || question.id,
+              );
+              const input = elem("input");
+              input.type = question.isSecret ? "password" : "text";
+              input.autocomplete = "off";
+              input.setAttribute(
+                "aria-label",
+                question.question || question.id,
+              );
+              if (question.options?.length) {
+                const choices = elem("select");
+                choices.setAttribute(
+                  "aria-label",
+                  (question.header || question.id) + "选项",
+                );
+                choices.append(new Option("选择一项，或在下方填写回答", ""));
+                for (const option of question.options)
+                  choices.append(
+                    new Option(
+                      option.label +
+                        (option.description ? " · " + option.description : ""),
+                      option.label,
+                    ),
+                  );
+                choices.onchange = () => {
+                  input.value = choices.value;
+                };
+                label.append(choices);
+              }
+              label.append(input);
+              answerFields.push({ id: question.id, input });
+              box.append(label);
+            }
+          }
+          const details = elem("details");
+          details.append(
+            elem("summary", "查看请求详情"),
+            elem("pre", JSON.stringify(request, null, 2)),
+          );
+          box.append(details);
+          const row = elem("div", undefined, "row");
+          for (const approved of [true, false]) {
+            const button = elem(
+              "button",
+              approved
+                ? isQuestion
+                  ? "提交回答"
+                  : "允许"
+                : isQuestion
+                  ? "跳过"
+                  : "拒绝",
+              approved ? "primary" : "danger",
+            );
+            button.onclick = async () => {
+              const payload = { approved };
+              try {
+                if (isQuestion) {
+                  payload.answers = {};
+                  if (approved)
+                    for (const field of answerFields) {
+                      const value = field.input.value.trim();
+                      if (!value)
+                        throw Error("请填写所有问题的回答，或选择跳过。");
+                      payload.answers[field.id] = { answers: [value] };
+                    }
+                }
+                for (const item of row.children) item.disabled = true;
+                await api("/api/approvals/" + approval.id, {
+                  method: "POST",
+                  body: JSON.stringify(payload),
+                });
+                approvalSignature = "";
+                await refreshView(selection);
+              } catch (error) {
+                status(error.message, true);
+                for (const item of row.children) item.disabled = false;
+              }
+            };
+            row.append(button);
+          }
+          box.append(row);
+          $("approvals").append(box);
+        }
+      }
+      async function refreshView(epoch) {
+        if (epoch !== selection || !selected) return;
+        if (refreshing) {
+          refreshAgain = true;
+          return;
+        }
+        refreshing = true;
+        const id = selected.id;
+        try {
+          const [history, approvals] = await Promise.all([
+            api("/api/sessions/" + id + "/history?limit=100"),
+            api("/api/approvals?state=pending"),
+          ]);
+          if (epoch !== selection) return;
+          const newest = history.turns || [];
+          const ids = new Set(newest.map((t) => t.id));
+          turns = [
+            ...newest,
+            ...turns.filter((t) => !ids.has(t.id) && !active(t)),
+          ];
+          if (turns.length === newest.length)
+            historyCursor = history.next_before || 0;
+          renderHistory();
+          renderApprovals(approvals.approvals || []);
+          $("more-history").hidden = !historyCursor;
+        } catch (error) {
+          if (epoch === selection) status("刷新失败：" + error.message, true);
+        } finally {
+          if (epoch === selection) {
+            refreshing = false;
+            if (refreshAgain) {
+              refreshAgain = false;
+              refreshView(epoch);
+            }
+          }
+        }
+      }
+      function scheduleRefresh(epoch) {
+        if (refreshTimer !== null || epoch !== selection) return;
+        refreshTimer = setTimeout(() => {
+          refreshTimer = null;
+          refreshView(epoch);
+        }, 500);
+      }
+      async function selectSession(session) {
+        stopWatch();
+        const epoch = selection;
+        selected = session;
+        if (matchMedia("(max-width: 760px)").matches)
+          $("new-session").open = false;
+        turns = [];
+        historyCursor = 0;
+        historySignature = "";
+        approvalSignature = "";
+        preview = "";
+        eventLines = [];
+        $("events").textContent = "正在连接事件流…";
+        $("stream-preview").textContent = "";
+        $("approvals").replaceChildren();
+        $("session-title").textContent = session.title || "未命名会话";
+        $("session-info").textContent =
+          session.runtime +
+          " · " +
+          (modes[session.mode] || session.mode) +
+          " · " +
+          session.workspace;
+        renderSessions();
+        renderHistory();
+        await refreshView(epoch);
+        if (epoch !== selection) return;
+        watch(epoch, session.id, 0);
+        const poll = async () => {
+          if (epoch !== selection) return;
+          await refreshView(epoch);
+          if (epoch === selection)
+            pollTimer = setTimeout(poll, busyTurn ? 2000 : 10000);
+        };
+        pollTimer = setTimeout(poll, 2000);
+      }
+      async function watch(epoch, id, cursor) {
+        if (epoch !== selection) return;
+        const controller = new AbortController();
+        streamController = controller;
+        let after = cursor;
+        try {
+          const response = await fetch(
+            mount + "/api/sessions/" + id + "/events/stream?after=" + after,
+            {
+              headers: { Authorization: "Bearer " + credential },
+              signal: controller.signal,
+              cache: "no-store",
+            },
+          );
+          if (!response.ok) throw Error("HTTP " + response.status);
+          status("已连接，正在同步会话。");
+          const reader = response.body.getReader(),
+            decoder = new TextDecoder();
+          let buffer = "";
+          while (epoch === selection) {
+            const chunk = await reader.read();
+            if (chunk.done) break;
+            buffer += decoder.decode(chunk.value, { stream: true });
+            const parts = buffer.split("\n\n");
+            buffer = parts.pop();
+            for (const part of parts) {
+              const line = part
+                .split("\n")
+                .find((line) => line.startsWith("data:"));
+              if (!line) continue;
+              let event;
+              try {
+                event = JSON.parse(line.slice(5));
+              } catch {
+                continue;
+              }
+              after = Math.max(after, event.id || 0);
+              eventLines.push(JSON.stringify(event));
+              eventLines = eventLines.slice(-80);
+              $("events").textContent = eventLines.join("\n");
+              const delta = event.data?.delta;
+              if (
+                busyTurn &&
+                event.turn_id === busyTurn.id &&
+                event.kind?.includes("agentMessage") &&
+                typeof delta === "string"
+              ) {
+                preview = (preview + delta).slice(-12000);
+                $("stream-preview").textContent = preview;
+              }
+              scheduleRefresh(epoch);
+            }
+          }
+        } catch (error) {
+          if (epoch === selection && !controller.signal.aborted)
+            status("事件连接中断，正在重连；对话记录仍会同步。", true);
+        } finally {
+          controller.abort();
+          if (epoch === selection)
+            streamTimer = setTimeout(() => watch(epoch, id, after), 2000);
+        }
+      }
+      $("connect-form").onsubmit = establish;
+      $("disconnect").onclick = disconnect;
+      $("refresh").onclick = () =>
+        loadSessions().catch((error) => status(error.message, true));
+      $("more-sessions").onclick = async () => {
+        const button = $("more-sessions");
+        button.disabled = true;
+        try {
+          await loadSessions(true);
+        } catch (error) {
+          status(error.message, true);
+        } finally {
+          button.disabled = false;
+        }
+      };
+      $("more-history").onclick = async () => {
+        const epoch = selection;
+        const button = $("more-history");
+        button.disabled = true;
+        try {
+          const data = await api(
+            "/api/sessions/" +
+              selected.id +
+              "/history?limit=100&before=" +
+              historyCursor,
+          );
+          if (epoch !== selection) return;
+          const ids = new Set(turns.map((t) => t.id));
+          turns.push(...(data.turns || []).filter((t) => !ids.has(t.id)));
+          historyCursor = data.next_before || 0;
+          renderHistory();
+          button.hidden = !historyCursor;
+        } catch (error) {
+          status(error.message, true);
+        } finally {
+          button.disabled = false;
+        }
+      };
+      $("create-form").onsubmit = async (event) => {
+        event.preventDefault();
+        if ($("create").disabled) return;
+        const epoch = connection;
+        creating = true;
+        $("create").disabled = true;
+        try {
+          const data = await api("/api/sessions", {
+            method: "POST",
+            body: JSON.stringify({
+              title: $("title").value.trim(),
+              runtime: $("runtime").value,
+              workspace: $("workspace").value,
+              mode: $("mode").value,
+              model: $("model").value.trim(),
+            }),
+          });
+          if (epoch !== connection || !connected) return;
+          await loadSessions();
+          if (epoch !== connection || !connected) return;
+          await selectSession(data.session);
+          $("title").value = "";
+          $("prompt").focus();
+          status("会话已创建。");
+        } catch (error) {
+          status(error.message, true);
+        } finally {
+          creating = false;
+          controls();
+        }
+      };
+      $("prompt-form").onsubmit = async (event) => {
+        event.preventDefault();
+        const prompt = $("prompt").value.trim();
+        if (!prompt || $("send").disabled) return;
+        const epoch = selection;
+        const id = selected.id;
+        sending = true;
+        controls();
+        try {
+          if (
+            !pendingAttempt ||
+            pendingAttempt.session_id !== id ||
+            pendingAttempt.prompt !== prompt
+          ) {
+            const bytes = crypto.getRandomValues(new Uint8Array(16));
+            pendingAttempt = {
+              session_id: id,
+              prompt,
+              idempotency_key: Array.from(bytes, (b) =>
+                b.toString(16).padStart(2, "0"),
+              ).join(""),
+            };
+          }
+          await api("/api/turns", {
+            method: "POST",
+            body: JSON.stringify(pendingAttempt),
+          });
+          pendingAttempt = null;
+          if (epoch === selection) {
+            $("prompt").value = "";
+            preview = "";
+            await refreshView(epoch);
+            $("history").scrollTop = $("history").scrollHeight;
+            status("任务已提交。");
+          }
+        } catch (error) {
+          status(error.message, true);
+        } finally {
+          sending = false;
+          controls();
+        }
+      };
+      $("prompt").onkeydown = (event) => {
+        if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+          event.preventDefault();
+          $("prompt-form").requestSubmit();
+        }
+      };
+      $("cancel").onclick = async () => {
+        if (!busyTurn) return;
+        $("cancel").disabled = true;
+        try {
+          await api("/api/turns/" + busyTurn.id + "/cancel", {
+            method: "POST",
+          });
+          await refreshView(selection);
+          status("已请求停止任务。");
+        } catch (error) {
+          status(error.message, true);
+          controls();
+        }
+      };
+      window.addEventListener("pagehide", stopWatch);
+      matchMedia("(max-width: 760px)").addEventListener("change", (event) => {
+        if (event.matches && selected) $("new-session").open = false;
+      });
+      try {
+        $("token").value = sessionStorage.getItem(storageKey) || "";
+      } catch {}
+      function consumeTokenFragment() {
+        const fragment = new URLSearchParams(location.hash.slice(1));
+        if (!fragment.has("token")) return false;
+        $("token").value = fragment.get("token");
+        history.replaceState(null, "", location.pathname + location.search);
+        return true;
+      }
+      window.addEventListener("hashchange", () => {
+        if (consumeTokenFragment()) establish();
+      });
+      consumeTokenFragment();
+      if ($("token").value) establish();
+    </script>
+  </body>
+</html>

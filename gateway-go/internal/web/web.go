@@ -36,6 +36,7 @@ func (s *Server) Handler() http.Handler {
 	m.HandleFunc("/console", console)
 	m.HandleFunc("/console/", console)
 	m.HandleFunc("/metrics", s.metrics)
+	m.HandleFunc("/api/runtime/status", s.runtimeStatus)
 	m.HandleFunc("/api/sessions", s.sessions)
 	m.HandleFunc("/api/sessions/", s.session)
 	m.HandleFunc("/api/turns", s.turns)
@@ -198,11 +199,12 @@ func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
 			s.writeErr(w, errors.New("full access is disabled"))
 			return
 		}
-		if _, e := s.Cfg.Workspace(v.Workspace); e != nil {
+		workspace, e := s.Cfg.Workspace(v.Workspace)
+		if e != nil {
 			s.writeErr(w, e)
 			return
 		}
-		x, e := s.Store.CreateSession(store.Session{Runtime: v.Runtime, Workspace: v.Workspace, Model: v.Model, Mode: v.Mode, Title: v.Title})
+		x, e := s.Store.CreateSession(store.Session{Runtime: v.Runtime, Workspace: workspace, Model: v.Model, Mode: v.Mode, Title: v.Title})
 		if e != nil {
 			s.writeErr(w, e)
 			return

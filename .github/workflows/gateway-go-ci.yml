@@ -15,6 +15,21 @@ permissions:
   contents: read
 
 jobs:
+  console:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: gateway-go/web-tests
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: gateway-go/web-tests/package-lock.json
+      - run: npm ci --include=dev
+      - run: npx playwright install --with-deps chromium
+      - run: npm test
   test:
     strategy:
       fail-fast: false

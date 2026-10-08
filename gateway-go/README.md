@@ -45,6 +45,31 @@ On macOS, use `deploy/com.stormlegend.rcodex-go.plist` with `launchctl
 bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.stormlegend.rcodex-go.plist`.
 Linux deployments can use `deploy/rcodex-go.service`.
 
+### Browser console
+
+Open `/console` on the gateway's local listener or HTTPS entry point. The
+console supports creating Codex/Claude sessions, choosing a permitted workspace
+and permission mode, sending tasks, viewing persistent history and streaming
+updates, stopping tasks, and resolving approvals or runtime questions. Tokens
+are stored in the current tab's session storage and cleared on disconnect.
+`GET /api/runtime/status` requires bearer auth and reports executable availability,
+workspace roots and permitted modes; it does not claim the runtime is logged in.
+
+On macOS, `python3 deploy/open-console-macos.py --config /path/to/gateway.json`
+opens a local console with the token from its config. `--copy-token` copies it
+to the clipboard without printing it. See the
+[Mac mini verification guide](../docs/MACMINI-QUICKSTART.md) for the independently
+managed preview instance and SSH access.
+
+Browser regression checks are isolated from the gateway's Go build:
+
+```sh
+cd web-tests
+npm ci --include=dev
+npx playwright install chromium
+npm test
+```
+
 ### Relay deployment
 
 Run `cmd/rcg-relay` on a public host with a TLS certificate. Start from

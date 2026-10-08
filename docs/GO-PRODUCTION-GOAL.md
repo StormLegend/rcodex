@@ -112,3 +112,17 @@ probe. The first candidate soak's wrong endpoint returned 404; that failed round
 was archived, and a fail-fast preflight was added. The existing Go service
 on 18890, its v0.2.9 soak, and the old Linux Node service remain unchanged.
 See the report for labels, log locations and verification timestamps.
+
+## 2026-10-08 Mac interactive verification
+
+Added an independent preview on loopback 18892, keeping the 18890/18891 processes
+and their soak runs intact. Found that their configured Codex executable was
+absent: prior HTTP health/soak evidence had not validated model execution. Installed
+managed Codex and Claude runtimes, used the Mac's existing Codex login, and added
+a browser console that can create sessions, send/cancel tasks, and resolve
+approvals/questions. Real Mac Codex read, write, context continuation, cancellation,
+gateway-restart resume, and browser conversation/reload checks passed. Claude
+is installed but not authenticated. Both older instances completed their 24-hour
+HTTP phases with 17,272 requests and zero failures; their 72-hour phases are still
+running. See [the acceptance record](GO-ACCEPTANCE-2026-10-08.md) and
+[Mac usage guide](MACMINI-QUICKSTART.md). Remaining production gates stay open.
