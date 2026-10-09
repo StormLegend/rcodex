@@ -126,3 +126,18 @@ not treat a long Goal as an unanswered HTTP request.
 
 The published Go service now uses `turn_seconds: 0` on the independent Mac
 preview. The legacy Node service and all other services were left unchanged.
+
+## Long-running Goal release follow-up
+
+- [v0.2.12-rc.2](https://github.com/StormLegend/rcodex/releases/tag/v0.2.12-rc.2)
+  contains the no-artificial-deadline engine behavior. Release CI passed for
+  all platform artifacts; the Mac arm64 archive SHA256 is
+  `5709b7b4ed6b5a6476ada0230ed05d8931c17551e89d03ae04617d489afbe73a`.
+- Mac mini now points `rcodex-go-preview/rcg` to
+  `releases/v0.2.12-rc.2-github/rcg`, with `turn_seconds: 0`; health reports
+  `v0.2.12-rc.2`, SQLite `quick_check` is `ok`, there are 478 sessions and no
+  queued/running turns. The pre-upgrade online SQLite backup is
+  `backups/pre-v0.2.12-rc.2-github.db`.
+- The previous independent release remains available at
+  `releases/v0.2.12-rc.1-github/rcg` for rollback. Old services were not
+  restarted or reconfigured.
