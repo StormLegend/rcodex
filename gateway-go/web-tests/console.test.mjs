@@ -63,19 +63,59 @@ async function fixture(t, prefix = "") {
         workspaces: ["/fixture/workspace"],
         modes: ["readonly", "ask", "auto"],
       });
+    if (path === "/api/models")
+      return send({
+        catalog: [
+          {
+            id: "codex-fixture",
+            name: "Codex Fixture",
+            runtime: "codex",
+            default_effort: "medium",
+            efforts: ["low", "medium", "high"],
+          },
+          {
+            id: "codex-small",
+            name: "Codex Small",
+            runtime: "codex",
+            default_effort: "low",
+            efforts: ["low", "high"],
+          },
+        ],
+      });
+    const sessionPath = path.match(/^\/api\/sessions\/([^/]+)$/);
+    if (sessionPath && req.method === "PATCH") {
+      const session = sessions.find((s) => s.id === sessionPath[1]);
+      if (!session) return send({}, 404);
+      if (
+        turns.some(
+          (t) =>
+            t.session_id === session.id &&
+            ["running", "queued"].includes(t.state),
+        )
+      )
+        return send({}, 409);
+      Object.assign(session, data);
+      return send({ session });
+    }
     if (path === "/api/sessions") {
       if (req.method === "POST") {
         const session = { id: "s" + ++sequence, ...data };
         sessions.unshift(session);
         return send({ session }, 201);
       }
-      return send({ sessions, next_before: 0 });
+      const offset = Number(url.searchParams.get("before") || 0),
+        limit = Number(url.searchParams.get("limit") || 100);
+      return send({
+        sessions: sessions.slice(offset, offset + limit),
+        next_before: offset + limit < sessions.length ? offset + limit : 0,
+      });
     }
     const history = path.match(/^\/api\/sessions\/([^/]+)\/history$/);
     if (history)
       return send({
         turns: turns.filter((x) => x.session_id === history[1]),
         next_before: 0,
+        usage: turns.find((x) => x.session_id === history[1])?.usage || null,
       });
     const stream = path.match(/^\/api\/sessions\/([^/]+)\/events\/stream$/);
     if (stream) {
@@ -401,4 +441,109 @@ test("appearance, session search, safe Markdown, clipboard and mobile navigation
   await f.page.locator("#sidebar").waitFor({ state: "hidden" });
   assert.equal(await f.page.locator("#new-session").isVisible(), false);
   assert.equal(await f.page.locator("#sidebar").isVisible(), false);
+});
+
+test("directory groups, restored archive, pagination, model switching and real usage", async (t) => {
+  const f = await fixture(t);
+  for (let i = 0; i < 505; i++)
+    f.sessions.push({
+      id: "import-" + i,
+      title: "Imported " + i,
+      runtime: "codex",
+      mode: "readonly",
+      workspace: "/fixture/workspace",
+      source_workspace: i < 2 ? "/original/alpha" : "/original/beta",
+      archived: i >= 2,
+      model: "codex-fixture",
+      effort: "medium",
+    });
+  f.turns.push({
+    id: "usage-turn",
+    session_id: "import-0",
+    prompt: "usage",
+    state: "completed",
+    result: "done",
+    usage: {
+      turn_id: "usage-turn",
+      tokens: {
+        inputTokens: 12000,
+        outputTokens: 200,
+        cachedInputTokens: 8000,
+        reasoningOutputTokens: 100,
+      },
+      context_tokens: 12200,
+      context_window: 100000,
+    },
+  });
+  await f.connect(true);
+  await f.page.waitForFunction(
+    () => document.querySelector("#session-title").textContent === "Imported 0",
+  );
+  assert.equal(await f.page.locator("#sessions .session").count(), 505);
+  const archive = f.page.locator('[data-folder="archive"]');
+  assert.equal(await archive.evaluate((el) => el.open), false);
+  assert.match(await archive.locator(":scope > summary").innerText(), /503/);
+  assert.match(await f.page.locator("#turn-usage").innerText(), /12,000.*200/);
+  assert.match(await f.page.locator("#context-usage").innerText(), /12.2%/);
+  assert.equal(await f.page.locator("#session-effort").inputValue(), "medium");
+  await f.page.locator("#session-model").selectOption("codex-small");
+  await f.page.waitForFunction(
+    () => document.querySelector("#session-effort").value === "low",
+  );
+  await f.page.locator("#session-effort").selectOption("high");
+  await f.page.waitForFunction(
+    () => !document.querySelector("#session-effort").disabled,
+  );
+  assert.equal(f.sessions[0].model, "codex-small");
+  assert.equal(f.sessions[0].effort, "high");
+  await f.page.locator("#archive-session").click();
+  await f.page.getByRole("button", { name: "恢复会话", exact: true }).waitFor();
+  assert.equal(await f.page.locator("#send").isDisabled(), true);
+  await f.page.reload();
+  await f.page.waitForFunction(
+    () => document.querySelector("#session-title").textContent === "Imported 1",
+  );
+  await f.page.locator("#search").fill("Imported 0");
+  await f.page.locator("#sessions .session").click();
+  await f.page.getByRole("button", { name: "恢复会话", exact: true }).click();
+  await f.page.waitForFunction(() => !document.querySelector("#send").disabled);
+  assert.equal(f.sessions[0].archived, false);
+  assert.equal(f.sessions[0].workspace, "/fixture/workspace");
+  await f.page.locator("#search").fill("/original/beta");
+  assert.equal(await f.page.locator("#sessions .session").count(), 503);
+  await f.page.setViewportSize({ width: 390, height: 844 });
+  assert.equal(
+    await f.page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+    true,
+  );
+});
+
+test("selected model and effort reach session creation; stream reconnect keeps task", async (t) => {
+  const f = await fixture(t);
+  await f.connect(true);
+  await f.page.locator("#new-conversation").click();
+  await f.page.locator("#model").selectOption("codex-fixture");
+  await f.page.locator("#effort").selectOption("high");
+  await f.page.locator("#create").click();
+  await f.page.waitForFunction(() => !document.querySelector("#send").disabled);
+  assert.equal(f.sessions[0].model, "codex-fixture");
+  assert.equal(f.sessions[0].effort, "high");
+  await f.prompt("cancel-me");
+  await f.page.waitForFunction(
+    () => document.querySelector("#session-model").disabled,
+  );
+  const id = f.sessions[0].id;
+  const old = [...(f.streams.get(id) || [])];
+  assert.equal(old.length, 1);
+  old[0].end();
+  await new Promise((resolve) => setTimeout(resolve, 3000));
+  assert.equal(f.streams.get(id)?.size, 1);
+  assert.equal(f.turns[0].state, "running");
+  assert.equal(f.attempts.length, 1);
+  assert.equal(
+    await f.page.locator("#session-title").innerText(),
+    "未命名会话",
+  );
 });

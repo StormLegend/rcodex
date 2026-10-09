@@ -78,16 +78,19 @@ func (e *Engine) run(parent context.Context, t store.Turn) {
 			var rs runtime.Session
 			var er error
 			if s.NativeID != "" {
-				rs = runtime.Session{ID: s.NativeID, Runtime: s.Runtime, CWD: s.Workspace, Model: s.Model, Mode: s.Mode}
+				rs = runtime.Session{ID: s.NativeID, Runtime: s.Runtime, CWD: s.Workspace, Model: s.Model, Mode: s.Mode, Effort: s.Effort}
 				rs, er = rt.Resume(ctx, rs, nil)
 			} else {
 				rs, er = rt.Start(ctx, s.Workspace, s.Model, s.Mode, nil)
+			}
+			if s.Effort != "" {
+				rs.Effort = s.Effort
 			}
 			if er != nil {
 				err = er
 			} else {
 				if rs.ID != "" {
-					err = e.Store.Native(s.ID, rs.ID)
+					err = e.Store.RecordRuntimeSession(s.ID, rs.ID, rs.Model, rs.Effort)
 				}
 				if err == nil {
 					result, err = rt.Turn(ctx, rs, t.Prompt, func(ev runtime.Event) error {

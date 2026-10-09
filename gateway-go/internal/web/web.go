@@ -179,6 +179,7 @@ func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
 			Runtime   string `json:"runtime"`
 			Workspace string `json:"workspace"`
 			Model     string `json:"model"`
+			Effort    string `json:"effort"`
 			Mode      string `json:"mode"`
 			Title     string `json:"title"`
 		}
@@ -204,12 +205,16 @@ func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
 			s.writeErr(w, errors.New("full access is disabled"))
 			return
 		}
+		if e := s.validateEffort(v.Runtime, v.Model, v.Effort); e != nil {
+			s.writeErr(w, e)
+			return
+		}
 		workspace, e := s.Cfg.Workspace(v.Workspace)
 		if e != nil {
 			s.writeErr(w, e)
 			return
 		}
-		x, e := s.Store.CreateSession(store.Session{Runtime: v.Runtime, Workspace: workspace, Model: v.Model, Mode: v.Mode, Title: v.Title})
+		x, e := s.Store.CreateSession(store.Session{Runtime: v.Runtime, Workspace: workspace, Model: v.Model, Mode: v.Mode, Title: v.Title, Effort: v.Effort})
 		if e != nil {
 			s.writeErr(w, e)
 			return
@@ -258,7 +263,15 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request) {
 			s.writeErr(w, e)
 			return
 		}
-		s.write(w, http.StatusOK, map[string]any{"turns": page.Items, "next_before": page.NextBefore})
+		var usage *store.Usage
+		if len(page.Items) > 0 {
+			usage, e = s.Store.TurnUsage(id, page.Items[0].ID)
+			if e != nil {
+				s.writeErr(w, e)
+				return
+			}
+		}
+		s.write(w, http.StatusOK, map[string]any{"turns": page.Items, "next_before": page.NextBefore, "usage": usage, "session": v})
 		return
 	}
 	if len(parts) > 1 && parts[1] == "attachments" {
@@ -280,9 +293,11 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Method == http.MethodPatch {
 		var x struct {
-			Model *string `json:"model"`
-			Mode  *string `json:"mode"`
-			Title *string `json:"title"`
+			Model    *string `json:"model"`
+			Mode     *string `json:"mode"`
+			Title    *string `json:"title"`
+			Effort   *string `json:"effort"`
+			Archived *bool   `json:"archived"`
 		}
 		if json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&x) != nil {
 			s.writeErr(w, errors.New("invalid body"))
@@ -306,7 +321,30 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request) {
 			s.writeErr(w, errors.New("full access is disabled"))
 			return
 		}
-		v, e = s.Store.UpdateSession(id, model, mode, title)
+		v.Model = model
+		v.Mode = mode
+		v.Title = title
+		if x.Effort != nil {
+			v.Effort = *x.Effort
+			if v.Effort == "" {
+				for _, m := range s.modelCatalog() {
+					if m.Runtime == v.Runtime && m.ID == model {
+						v.Effort = m.DefaultEffort
+						break
+					}
+				}
+			}
+		}
+		if x.Archived != nil {
+			v.Archived = *x.Archived
+		}
+		if x.Model != nil || x.Effort != nil {
+			if e = s.validateEffort(v.Runtime, v.Model, v.Effort); e != nil {
+				s.writeErr(w, e)
+				return
+			}
+		}
+		v, e = s.Store.SaveSession(v)
 		if e != nil {
 			s.writeErr(w, e)
 			return
@@ -339,17 +377,42 @@ func queryLimit(raw string, fallback, max int) int {
 	return n
 }
 func (s *Server) eventStream(w http.ResponseWriter, r *http.Request, sessionID string) {
-	f, ok := w.(http.Flusher)
-	if !ok {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if _, ok := w.(http.Flusher); !ok {
 		http.Error(w, "stream unsupported", 500)
 		return
 	}
 	after, _ := strconv.ParseInt(r.URL.Query().Get("after"), 10, 64)
+	if after == 0 {
+		after, _ = strconv.ParseInt(r.Header.Get("Last-Event-ID"), 10, 64)
+	}
 	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Cache-Control", "no-cache, no-transform")
+	w.Header().Set("X-Accel-Buffering", "no")
+	rc := http.NewResponseController(w)
+	// Streaming has its own per-write deadline. A server-wide WriteTimeout is
+	// an absolute deadline and otherwise kills even localhost streams at 30s.
+	write := func(frame string) error {
+		_ = rc.SetWriteDeadline(time.Now().Add(10 * time.Second))
+		if _, err := w.Write([]byte(frame)); err != nil {
+			return err
+		}
+		if err := rc.Flush(); err != nil {
+			return err
+		}
+		_ = rc.SetWriteDeadline(time.Time{})
+		return nil
+	}
+	if write(": connected\nretry: 2000\n\n") != nil {
+		return
+	}
 	ticker := time.NewTicker(300 * time.Millisecond)
 	defer ticker.Stop()
+	heartbeat := time.NewTicker(10 * time.Second)
+	defer heartbeat.Stop()
 	for {
 		events, err := s.Store.Events(sessionID, after, 0, 100)
 		if err != nil {
@@ -357,18 +420,30 @@ func (s *Server) eventStream(w http.ResponseWriter, r *http.Request, sessionID s
 		}
 		for _, ev := range events {
 			b, _ := json.Marshal(ev)
-			_, _ = w.Write([]byte("id: " + strconv.FormatInt(ev.ID, 10) + "\ndata: " + string(b) + "\n\n"))
+			if write("id: "+strconv.FormatInt(ev.ID, 10)+"\ndata: "+string(b)+"\n\n") != nil {
+				return
+			}
 			after = ev.ID
 		}
-		if len(events) > 0 {
-			f.Flush()
+		if len(events) == 100 {
+			select {
+			case <-r.Context().Done():
+				return
+			default:
+			}
+			continue
 		}
 		select {
 		case <-r.Context().Done():
 			return
 		case <-ticker.C:
+		case <-heartbeat.C:
+			if write(": heartbeat\n\n") != nil {
+				return
+			}
 		}
 	}
+
 }
 func (s *Server) turns(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" {
@@ -671,7 +746,7 @@ func (s *Server) models(w http.ResponseWriter, r *http.Request) {
 			out[name] = append([]string(nil), p.Models...)
 		}
 	}
-	s.write(w, http.StatusOK, map[string]any{"models": out})
+	s.write(w, http.StatusOK, map[string]any{"models": out, "catalog": s.modelCatalog()})
 }
 func (s *Server) approval(w http.ResponseWriter, r *http.Request) {
 	id := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/api/approvals/"), "/")

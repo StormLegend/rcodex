@@ -41,6 +41,8 @@ func TestClaudeUsesSessionIDThenResume(t *testing.T) {
 	if err != nil || s.ID == "" {
 		t.Fatalf("start=%+v err=%v", s, err)
 	}
+	s.Model = "opus"
+	s.Effort = "high"
 	if _, err = rt.Turn(context.Background(), s, "one", nil); err != nil {
 		t.Fatal(err)
 	}
@@ -55,6 +57,9 @@ func TestClaudeUsesSessionIDThenResume(t *testing.T) {
 		t.Fatal(err)
 	}
 	lines := strings.Split(strings.TrimSpace(string(b)), "\n")
+	if !strings.Contains(string(b), "--model opus --effort high") {
+		t.Fatalf("settings missing: %s", b)
+	}
 	if len(lines) != 2 || !strings.Contains(lines[0], "--session-id "+s.ID) || !strings.Contains(lines[1], "--resume "+s.ID) {
 		t.Fatalf("claude args=%q session=%s", string(b), s.ID)
 	}

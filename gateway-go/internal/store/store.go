@@ -11,6 +11,7 @@ import (
 	_ "modernc.org/sqlite"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -19,14 +20,17 @@ var ErrNotFound = errors.New("not found")
 
 type Store struct{ DB *sql.DB }
 type Session struct {
-	ID        string `json:"id"`
-	Runtime   string `json:"runtime"`
-	NativeID  string `json:"native_id,omitempty"`
-	Workspace string `json:"workspace"`
-	Model     string `json:"model"`
-	Mode      string `json:"mode"`
-	Title     string `json:"title"`
-	Created   int64  `json:"created"`
+	ID              string `json:"id"`
+	Runtime         string `json:"runtime"`
+	NativeID        string `json:"native_id,omitempty"`
+	Workspace       string `json:"workspace"`
+	Model           string `json:"model"`
+	Mode            string `json:"mode"`
+	Title           string `json:"title"`
+	Created         int64  `json:"created"`
+	Effort          string `json:"effort"`
+	Archived        bool   `json:"archived"`
+	SourceWorkspace string `json:"source_workspace,omitempty"`
 }
 type Turn struct {
 	ID        string `json:"id"`
@@ -148,6 +152,8 @@ func Open(file string) (*Store, error) {
  CREATE TABLE IF NOT EXISTS schedules(id TEXT PRIMARY KEY,session_id TEXT NOT NULL REFERENCES sessions(id),prompt TEXT NOT NULL,expression TEXT NOT NULL,next_at INTEGER NOT NULL,paused INTEGER NOT NULL DEFAULT 0);
  CREATE TABLE IF NOT EXISTS attachments(id TEXT PRIMARY KEY,session_id TEXT NOT NULL REFERENCES sessions(id),name TEXT NOT NULL,path TEXT NOT NULL,mime TEXT NOT NULL,size INTEGER NOT NULL,created INTEGER NOT NULL);
  CREATE INDEX IF NOT EXISTS attachment_session ON attachments(session_id,created);
+ CREATE TABLE IF NOT EXISTS session_preferences(session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,effort TEXT NOT NULL DEFAULT '',archived INTEGER NOT NULL DEFAULT 0,source_workspace TEXT NOT NULL DEFAULT '');
+ CREATE INDEX IF NOT EXISTS event_usage ON events(session_id,turn_id,kind,id);
  PRAGMA user_version=1;`)
 	if e != nil {
 		db.Close()
@@ -164,19 +170,34 @@ func (s *Store) CreateSession(v Session) (Session, error) {
 		v.ID = ID()
 	}
 	v.Created = Now()
-	_, e := s.DB.Exec(`INSERT INTO sessions VALUES(?,?,?,?,?,?,?,?)`, v.ID, v.Runtime, v.NativeID, v.Workspace, v.Model, v.Mode, v.Title, v.Created)
-	return v, e
+	tx, e := s.DB.Begin()
+	if e != nil {
+		return v, e
+	}
+	defer tx.Rollback()
+	_, e = tx.Exec(`INSERT INTO sessions VALUES(?,?,?,?,?,?,?,?)`, v.ID, v.Runtime, v.NativeID, v.Workspace, v.Model, v.Mode, v.Title, v.Created)
+	if e != nil {
+		return v, e
+	}
+	_, e = tx.Exec(`INSERT INTO session_preferences VALUES(?,?,?,?)`, v.ID, v.Effort, v.Archived, v.SourceWorkspace)
+	if e != nil {
+		return v, e
+	}
+	return v, tx.Commit()
 }
+
+const sessionSelect = `SELECT s.id,s.runtime,s.native_id,s.workspace,s.model,s.mode,s.title,s.created,COALESCE(p.effort,''),COALESCE(p.archived,0),COALESCE(p.source_workspace,'') FROM sessions s LEFT JOIN session_preferences p ON p.session_id=s.id`
+
 func scanSession(row interface{ Scan(...any) error }) (Session, error) {
 	var v Session
-	e := row.Scan(&v.ID, &v.Runtime, &v.NativeID, &v.Workspace, &v.Model, &v.Mode, &v.Title, &v.Created)
+	e := row.Scan(&v.ID, &v.Runtime, &v.NativeID, &v.Workspace, &v.Model, &v.Mode, &v.Title, &v.Created, &v.Effort, &v.Archived, &v.SourceWorkspace)
 	if errors.Is(e, sql.ErrNoRows) {
 		e = ErrNotFound
 	}
 	return v, e
 }
 func (s *Store) Session(id string) (Session, error) {
-	return scanSession(s.DB.QueryRow(`SELECT * FROM sessions WHERE id=?`, id))
+	return scanSession(s.DB.QueryRow(sessionSelect+` WHERE s.id=?`, id))
 }
 func (s *Store) Sessions(before int64, limit int) ([]Session, error) {
 	p, e := s.SessionsPage(before, limit)
@@ -190,7 +211,7 @@ func (s *Store) SessionsPage(before int64, limit int) (SessionPage, error) {
 	if before == 0 {
 		before = 1 << 62
 	}
-	rows, e := s.DB.Query(`SELECT rowid,* FROM sessions WHERE rowid<? ORDER BY rowid DESC LIMIT ?`, before, limit+1)
+	rows, e := s.DB.Query(strings.Replace(sessionSelect, "SELECT ", "SELECT s.rowid,", 1)+` WHERE s.rowid<? ORDER BY s.rowid DESC LIMIT ?`, before, limit+1)
 	if e != nil {
 		return page, e
 	}
@@ -200,7 +221,7 @@ func (s *Store) SessionsPage(before int64, limit int) (SessionPage, error) {
 	for rows.Next() {
 		var rowid int64
 		var v Session
-		if e := rows.Scan(&rowid, &v.ID, &v.Runtime, &v.NativeID, &v.Workspace, &v.Model, &v.Mode, &v.Title, &v.Created); e != nil {
+		if e := rows.Scan(&rowid, &v.ID, &v.Runtime, &v.NativeID, &v.Workspace, &v.Model, &v.Mode, &v.Title, &v.Created, &v.Effort, &v.Archived, &v.SourceWorkspace); e != nil {
 			return page, e
 		}
 		rowIDs = append(rowIDs, rowid)
@@ -267,14 +288,14 @@ func (s *Store) Native(id, native string) error {
 	return e
 }
 func (s *Store) UpdateSession(id, model, mode, title string) (Session, error) {
-	if _, e := s.Session(id); e != nil {
-		return Session{}, e
-	}
-	_, e := s.DB.Exec(`UPDATE sessions SET model=?,mode=?,title=? WHERE id=?`, model, mode, title, id)
+	v, e := s.Session(id)
 	if e != nil {
-		return Session{}, e
+		return v, e
 	}
-	return s.Session(id)
+	v.Model = model
+	v.Mode = mode
+	v.Title = title
+	return s.SaveSession(v)
 }
 func (s *Store) DeleteSession(id string) ([]string, error) {
 	tx, e := s.DB.Begin()
@@ -282,7 +303,7 @@ func (s *Store) DeleteSession(id string) ([]string, error) {
 		return nil, e
 	}
 	defer tx.Rollback()
-	if _, e = scanSession(tx.QueryRow(`SELECT * FROM sessions WHERE id=?`, id)); e != nil {
+	if _, e = scanSession(tx.QueryRow(sessionSelect+` WHERE s.id=?`, id)); e != nil {
 		return nil, e
 	}
 	var active int
@@ -347,6 +368,13 @@ func (s *Store) Enqueue(session, prompt, key, notify string, capacity int) (Turn
 		if !errors.Is(e, ErrNotFound) {
 			return Turn{}, e
 		}
+	}
+	var archived bool
+	if e = tx.QueryRow(`SELECT COALESCE((SELECT archived FROM session_preferences WHERE session_id=?),0)`, session).Scan(&archived); e != nil {
+		return Turn{}, e
+	}
+	if archived {
+		return Turn{}, errors.New("session is archived; restore it before sending a turn")
 	}
 	var count int
 	if e = tx.QueryRow(`SELECT count(*) FROM turns WHERE state='queued'`).Scan(&count); e != nil {

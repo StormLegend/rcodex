@@ -73,6 +73,11 @@ func TestCodexProtocolHelper(t *testing.T) {
 			}
 			reply(map[string]any{"thread": map[string]any{"id": p.ThreadID}})
 		case "turn/start":
+			if target := os.Getenv("RCG_TEST_TURN_PARAMS"); target != "" {
+				if e := os.WriteFile(target, req.Params, 0600); e != nil {
+					os.Exit(19)
+				}
+			}
 			var p struct {
 				ThreadID string `json:"threadId"`
 				Sandbox  struct {
@@ -193,5 +198,39 @@ func TestCodexCancellationAndEventFailureReapProcess(t *testing.T) {
 				t.Fatal(err)
 			}
 		})
+	}
+}
+
+func TestCodexModelAndEffortReachResumedTurn(t *testing.T) {
+	command := codexFixture(t)
+	capture := filepath.Join(t.TempDir(), "params.json")
+	t.Setenv("RCG_TEST_TURN_PARAMS", capture)
+	rt := NewCodex(command)
+	defer rt.Stop()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	s, err := rt.Start(ctx, t.TempDir(), "", "readonly", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Model = "selected-model"
+	s.Effort = "ultra"
+	s, err = rt.Resume(ctx, s, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = rt.Turn(ctx, s, "success", nil); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(capture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var params map[string]any
+	if err = json.Unmarshal(b, &params); err != nil {
+		t.Fatal(err)
+	}
+	if params["model"] != "selected-model" || params["effort"] != "ultra" {
+		t.Fatalf("turn settings: %s", b)
 	}
 }

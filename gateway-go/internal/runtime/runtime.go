@@ -41,6 +41,7 @@ type Session struct {
 	CWD     string
 	Model   string
 	Mode    string
+	Effort  string
 }
 type adapter struct {
 	cmd                      string
@@ -290,6 +291,7 @@ func (a *Codex) Start(ctx context.Context, cwd, model, mode string, h Handler) (
 	}
 	var response struct {
 		Model  string `json:"model"`
+		Effort string `json:"reasoningEffort"`
 		Thread struct {
 			ID    string `json:"id"`
 			Model string `json:"model"`
@@ -304,7 +306,7 @@ func (a *Codex) Start(ctx context.Context, cwd, model, mode string, h Handler) (
 	if response.Model == "" {
 		response.Model = model
 	}
-	return Session{ID: response.Thread.ID, Runtime: "codex", CWD: cwd, Model: response.Model, Mode: mode}, nil
+	return Session{ID: response.Thread.ID, Runtime: "codex", CWD: cwd, Model: response.Model, Mode: mode, Effort: response.Effort}, nil
 }
 func (a *Codex) Resume(ctx context.Context, s Session, h Handler) (Session, error) {
 	end, e := a.begin(ctx)
@@ -320,8 +322,24 @@ func (a *Codex) Resume(ctx context.Context, s Session, h Handler) (Session, erro
 	if s.Model != "" {
 		params["model"] = s.Model
 	}
-	_, e = a.request(ctx, "thread/resume", params)
-	return s, e
+	raw, e := a.request(ctx, "thread/resume", params)
+	if e != nil {
+		return s, e
+	}
+	var response struct {
+		Model  string `json:"model"`
+		Effort string `json:"reasoningEffort"`
+	}
+	if e = json.Unmarshal(raw, &response); e != nil {
+		return s, e
+	}
+	if s.Model == "" {
+		s.Model = response.Model
+	}
+	if s.Effort == "" {
+		s.Effort = response.Effort
+	}
+	return s, nil
 }
 func (a *Codex) Turn(ctx context.Context, s Session, prompt string, h Handler) (string, error) {
 	end, err := a.begin(ctx)
@@ -343,6 +361,9 @@ func (a *Codex) Turn(ctx context.Context, s Session, prompt string, h Handler) (
 	params := map[string]any{"threadId": s.ID, "cwd": s.CWD, "approvalPolicy": settings.ApprovalPolicy, "approvalsReviewer": settings.ApprovalsReviewer, "sandboxPolicy": settings.SandboxPolicy, "input": []map[string]any{{"type": "text", "text": prompt, "text_elements": []string{}}}}
 	if s.Model != "" {
 		params["model"] = s.Model
+	}
+	if s.Effort != "" {
+		params["effort"] = s.Effort
 	}
 	raw, err := a.request(ctx, "turn/start", params)
 	if err != nil {
@@ -528,6 +549,9 @@ func (a *Claude) Turn(ctx context.Context, s Session, prompt string, h Handler) 
 	a.mu.Unlock()
 	if s.Model != "" {
 		args = append(args, "--model", s.Model)
+	}
+	if s.Effort != "" {
+		args = append(args, "--effort", s.Effort)
 	}
 	args = append(args, claudePermissionArgs(s.Mode)...)
 	cmd := exec.CommandContext(ctx, a.command, args...)

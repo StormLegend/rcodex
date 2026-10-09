@@ -55,6 +55,19 @@ are stored in the current tab's session storage and cleared on disconnect.
 `GET /api/runtime/status` requires bearer auth and reports executable availability,
 workspace roots and permitted modes; it does not claim the runtime is logged in.
 
+Sessions are grouped by source directory, with a separate collapsible Archive
+folder and reversible archive/restore actions. Model and reasoning effort can
+be selected at creation or changed between turns. Codex model choices follow
+its local model cache. The composer shows actual per-turn token usage and the
+latest reported context percentage; unavailable telemetry stays marked as such.
+The SSE stream uses 10-second heartbeats and reconnects without replaying work.
+
+`PATCH /api/sessions/{id}` accepts `model`, `effort`, `archived`, `mode` and
+`title`. Active turns prevent settings changes; archived sessions must be
+restored before enqueueing new work. History responses include the current
+session and the latest listed turn's `usage` telemetry. `/api/models` preserves
+its provider inventory and additionally returns a runtime model `catalog`.
+
 On macOS, `python3 deploy/open-console-macos.py --config /path/to/gateway.json`
 opens a local console with the token from its config. `--copy-token` copies it
 to the clipboard without printing it. See the

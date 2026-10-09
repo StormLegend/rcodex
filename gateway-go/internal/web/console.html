@@ -1224,6 +1224,106 @@
           scroll-behavior: auto !important;
         }
       }
+      .session-folder {
+        margin: 4px 0;
+      }
+      .session-folder > summary {
+        cursor: pointer;
+        padding: 10px 7px;
+        display: flex;
+        gap: 7px;
+        align-items: center;
+        color: var(--muted);
+        font-size: 12px;
+        border-radius: 8px;
+      }
+      .session-folder > summary:hover {
+        background: var(--hover);
+      }
+      .session-folder > summary::before {
+        content: "›";
+        font-size: 16px;
+        flex: none;
+      }
+      .session-folder[open] > summary::before {
+        transform: rotate(90deg);
+      }
+      .session-folder > summary span {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        flex: 1;
+      }
+      .session-folder > summary small {
+        font-variant-numeric: tabular-nums;
+      }
+      .session-folder > .session {
+        margin-left: 5px;
+        width: calc(100% - 5px);
+      }
+      .session-folder.archive {
+        border-bottom: 1px solid var(--line);
+        margin-bottom: 12px;
+        padding-bottom: 8px;
+      }
+      .session-folder.archive > .session-folder {
+        margin-left: 8px;
+      }
+      .session-settings {
+        max-width: 790px;
+        margin: 0 auto;
+        display: flex;
+        gap: 10px;
+        align-items: end;
+        flex-wrap: wrap;
+        padding: 0 2px 12px;
+      }
+      .session-settings label {
+        font-size: 11px;
+        color: var(--muted);
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        min-width: 0;
+      }
+      .session-settings select {
+        padding: 7px 10px;
+        max-width: 220px;
+        font-size: 12px;
+      }
+      .session-settings #archive-session {
+        margin-left: auto;
+        padding: 7px 10px;
+        font-size: 12px;
+      }
+      .usage-meter {
+        max-width: 790px;
+        margin: 0 auto;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+        font-size: 11px;
+        color: var(--muted);
+        padding: 8px 2px 0;
+        font-variant-numeric: tabular-nums;
+      }
+      .usage-meter progress {
+        width: 72px;
+        height: 5px;
+        accent-color: var(--accent);
+      }
+      @media (max-width: 760px) {
+        .session-settings {
+          gap: 7px;
+        }
+        .session-settings select {
+          max-width: 170px;
+        }
+        .usage-meter {
+          font-size: 10px;
+        }
+      }
     </style>
   </head>
   <body>
@@ -1338,7 +1438,7 @@
         /></label>
         <section class="session-section">
           <div class="section-label">
-            <span>最近对话</span
+            <span>目录与会话</span
             ><button
               id="refresh"
               class="icon-button"
@@ -1422,6 +1522,18 @@
           <div id="stream-preview" aria-live="polite"></div>
           <div id="approvals"></div>
           <div class="composer-wrap">
+            <div class="session-settings" id="session-settings" hidden>
+              <label
+                >模型<select id="session-model" aria-label="当前模型"></select
+              ></label>
+              <label
+                >推理强度<select
+                  id="session-effort"
+                  aria-label="当前推理强度"
+                ></select
+              ></label>
+              <button id="archive-session" type="button">归档会话</button>
+            </div>
             <form id="prompt-form" class="composer">
               <label for="prompt" class="sr-only">任务内容</label
               ><textarea
@@ -1454,6 +1566,17 @@
                 </button>
               </div>
             </form>
+            <div class="usage-meter" id="usage-meter" role="status">
+              <span id="turn-usage">Token 用量尚未上报</span
+              ><progress
+                id="context-meter"
+                max="100"
+                value="0"
+                hidden
+                aria-label="上下文占用"
+              ></progress
+              ><span id="context-usage"></span>
+            </div>
             <div class="composer-footnote">
               <span id="task-status" role="status"
                 >在你的设备上执行，随时由你掌控。</span
@@ -1539,12 +1662,19 @@
             ><label>权限<select id="mode" disabled></select></label>
           </div>
           <label>工作目录<select id="workspace" disabled></select></label>
-          <details class="advanced">
-            <summary>模型设置</summary>
+          <div class="form-grid">
             <label
-              >模型（可选）<input id="model" placeholder="使用助手默认模型"
-            /></label>
-          </details>
+              >模型<select id="model" aria-label="新会话模型"></select
+            ></label>
+            <label
+              >推理强度<select id="effort" aria-label="新会话推理强度"></select
+            ></label>
+          </div>
+          <label id="custom-model-label" hidden
+            >自定义模型 ID<input
+              id="custom-model"
+              placeholder="输入提供商的模型 ID"
+          /></label>
           <p id="runtime-help" class="dialog-footnote">
             连接网关后即可选择助手。
           </p>
@@ -1647,6 +1777,154 @@
         busyTurn = null,
         historySignature = "",
         approvalSignature = "";
+      let catalog = [],
+        usage = null,
+        savingSettings = false,
+        reconnectAttempt = 0;
+      const folderState = new Map();
+      try {
+        for (const [key, value] of JSON.parse(
+          localStorage.getItem("rcgFolders:" + mount) || "[]",
+        ))
+          folderState.set(key, value);
+      } catch {}
+      const effortNames = {
+        none: "关闭",
+        minimal: "最小",
+        low: "低",
+        medium: "中",
+        high: "高",
+        xhigh: "很高",
+        max: "最高",
+        ultra: "极高",
+      };
+      function fillModels(id, runtime, current = "") {
+        const el = $(id);
+        el.replaceChildren(
+          new Option(
+            id === "session-model" ? "沿用会话模型" : "助手默认模型",
+            "",
+          ),
+        );
+        for (const model of catalog.filter((m) => m.runtime === runtime))
+          el.append(new Option(model.name || model.id, model.id));
+        if (current && ![...el.options].some((o) => o.value === current))
+          el.append(new Option(current, current));
+        if (id === "model") el.append(new Option("自定义模型…", "__custom__"));
+        el.value = current;
+      }
+      function fillEfforts(id, runtime, model, current = "") {
+        const choice = catalog.find(
+          (m) => m.runtime === runtime && m.id === model,
+        );
+        const levels = choice?.efforts?.length
+          ? choice.efforts
+          : runtime === "claude"
+            ? ["low", "medium", "high", "xhigh", "max"]
+            : ["low", "medium", "high", "xhigh", "max", "ultra"];
+        const el = $(id);
+        el.replaceChildren(
+          new Option(
+            choice?.default_effort
+              ? "默认 · " +
+                (effortNames[choice.default_effort] || choice.default_effort)
+              : "助手默认强度",
+            "",
+          ),
+        );
+        for (const level of levels)
+          el.append(
+            new Option((effortNames[level] || level) + " · " + level, level),
+          );
+        if (current && !levels.includes(current))
+          el.append(new Option(current + "（原设置）", current));
+        el.value = current;
+      }
+      function newModelSettings() {
+        fillModels("model", $("runtime").value);
+        fillEfforts("effort", $("runtime").value, "");
+        $("custom-model-label").hidden = true;
+      }
+      function sessionSettings() {
+        $("session-settings").hidden = !selected;
+        if (!selected) return;
+        fillModels("session-model", selected.runtime, selected.model || "");
+        fillEfforts(
+          "session-effort",
+          selected.runtime,
+          selected.model,
+          selected.effort || "",
+        );
+        $("archive-session").textContent = selected.archived
+          ? "恢复会话"
+          : "归档会话";
+      }
+      function renderUsage() {
+        const format = (n) => Number(n).toLocaleString();
+        $("turn-usage").textContent = usage
+          ? "本轮输入 " +
+            format(usage.tokens.inputTokens) +
+            " · 输出 " +
+            format(usage.tokens.outputTokens) +
+            " tokens"
+          : "本轮 Token 用量尚未上报";
+        $("turn-usage").title = usage
+          ? "输入包含缓存命中 " +
+            format(usage.tokens.cachedInputTokens) +
+            " tokens；推理输出 " +
+            format(usage.tokens.reasoningOutputTokens) +
+            " tokens"
+          : "仅显示助手实际上报的数据";
+        const known = usage?.context_window > 0 && usage?.context_tokens > 0;
+        $("context-meter").hidden = !known;
+        $("context-usage").textContent = known
+          ? "上下文 " +
+            ((usage.context_tokens / usage.context_window) * 100).toFixed(1) +
+            "% · " +
+            format(usage.context_tokens) +
+            " / " +
+            format(usage.context_window)
+          : "上下文占用尚未上报";
+        $("context-meter").value = known
+          ? Math.min(100, (usage.context_tokens / usage.context_window) * 100)
+          : 0;
+        $("context-usage").title =
+          "最近一次模型请求的 token 数 / 助手报告的上下文窗口；不是整个会话的累计用量。";
+      }
+      async function saveSettings(patch) {
+        if (!selected || savingSettings) return;
+        const epoch = selection,
+          id = selected.id;
+        savingSettings = true;
+        controls();
+        try {
+          const data = await api("/api/sessions/" + id, {
+            method: "PATCH",
+            body: JSON.stringify(patch),
+          });
+          const index = sessions.findIndex((s) => s.id === id);
+          if (index >= 0) sessions[index] = data.session;
+          if (epoch !== selection) return;
+          selected = data.session;
+          sessionSettings();
+          renderSessions();
+          status(
+            patch.archived === true
+              ? "已移入归档目录，可随时恢复。"
+              : patch.archived === false
+                ? "会话已恢复。"
+                : "模型设置已保存，下次发送时生效。",
+          );
+        } catch (error) {
+          if (epoch === selection) {
+            status(error.message, true);
+            sessionSettings();
+          }
+        } finally {
+          savingSettings = false;
+          controls();
+        }
+      }
       function status(message, error = false) {
         $("status").textContent = message;
         $("status").classList.toggle("error", error);
@@ -1873,9 +2151,22 @@
       }
       function controls() {
         busyTurn = turns.find(active) || null;
-        $("prompt").disabled = !connected || !selected;
-        $("send").disabled = !connected || !selected || !!busyTurn || sending;
+        $("prompt").disabled = !connected || !selected || !!selected?.archived;
+        $("send").disabled =
+          !connected ||
+          !selected ||
+          !!selected?.archived ||
+          !!busyTurn ||
+          sending ||
+          creating ||
+          savingSettings;
         $("cancel").disabled = !connected || !busyTurn;
+        for (const id of ["session-model", "session-effort", "archive-session"])
+          $(id).disabled =
+            !connected || !selected || !!busyTurn || savingSettings;
+        $("session-settings").hidden = !selected;
+        if (selected?.archived) $("prompt").placeholder = "恢复会话后继续对话";
+        else $("prompt").placeholder = "描述你想做的事…";
         $("create").disabled = !connected || !$("runtime").value || creating;
         $("refresh").disabled = !connected;
         $("disconnect").disabled = !connected;
@@ -1915,6 +2206,8 @@
         $("token").value = "";
         $("connect").disabled = false;
         selected = null;
+        usage = null;
+        renderUsage();
         sessions = [];
         turns = [];
         renderSessions();
@@ -1936,32 +2229,118 @@
         list.replaceChildren();
         const query = $("search").value.trim().toLocaleLowerCase();
         const visible = sessions.filter((s) =>
-          (s.title + " " + s.runtime + " " + s.workspace)
+          (
+            s.title +
+            " " +
+            s.runtime +
+            " " +
+            s.workspace +
+            " " +
+            (s.source_workspace || "")
+          )
             .toLocaleLowerCase()
             .includes(query),
         );
-        for (const s of visible) {
-          const button = elem(
-            "button",
+        const makeFolder = (
+          parent,
+          key,
+          label,
+          count,
+          title,
+          defaultOpen = false,
+        ) => {
+          const folder = elem(
+            "details",
             undefined,
-            "session" + (selected?.id === s.id ? " active" : ""),
+            "session-folder" + (key === "archive" ? " archive" : ""),
           );
-          button.append(
-            icon("message"),
-            elem("strong", s.title || "未命名会话"),
-            elem(
-              "small",
-              (s.runtime === "claude" ? "Claude Code" : "Codex") +
-                " · " +
-                (modes[s.mode]?.split(" · ")[0] || s.mode),
+          folder.dataset.folder = key;
+          folder.open = query
+            ? true
+            : folderState.has(key)
+              ? folderState.get(key)
+              : defaultOpen;
+          const summary = elem("summary");
+          summary.title = title;
+          summary.append(
+            icon("folder"),
+            elem("span", label),
+            elem("small", count),
+          );
+          folder.append(summary);
+          folder.ontoggle = () => {
+            if (!folder.isConnected || query) return;
+            folderState.set(key, folder.open);
+            try {
+              localStorage.setItem(
+                "rcgFolders:" + mount,
+                JSON.stringify([...folderState]),
+              );
+            } catch {}
+          };
+          parent.append(folder);
+          return folder;
+        };
+        const grouped = (items, parent, prefix) => {
+          const groups = new Map();
+          for (const session of items) {
+            const path =
+              session.source_workspace || session.workspace || "未指定目录";
+            if (!groups.has(path)) groups.set(path, []);
+            groups.get(path).push(session);
+          }
+          for (const [path, items] of groups) {
+            const label = path.split(/[\\/]/).filter(Boolean).pop() || path;
+            const folder = makeFolder(
+              parent,
+              prefix + path,
+              label,
+              items.length,
+              path,
+              items.some((s) => s.id === selected?.id),
+            );
+            for (const s of items) {
+              const button = elem(
+                "button",
+                undefined,
+                "session" + (selected?.id === s.id ? " active" : ""),
+              );
+              button.append(
+                icon("message"),
+                elem("strong", s.title || "未命名会话"),
+                elem(
+                  "small",
+                  (s.runtime === "claude" ? "Claude Code" : "Codex") +
+                    " · " +
+                    (s.model || "默认模型"),
+                ),
+              );
+              button.title = (s.title || "未命名会话") + "\n" + path;
+              if (selected?.id === s.id)
+                button.setAttribute("aria-current", "page");
+              button.onclick = () => selectSession(s);
+              folder.append(button);
+            }
+          }
+        };
+        const archived = visible.filter((s) => s.archived);
+        if (archived.length)
+          grouped(
+            archived,
+            makeFolder(
+              list,
+              "archive",
+              "归档",
+              archived.length,
+              "已归档的会话，可随时恢复",
             ),
+            "archived:",
           );
-          button.title = s.title || "未命名会话";
-          if (selected?.id === s.id)
-            button.setAttribute("aria-current", "page");
-          button.onclick = () => selectSession(s);
-          list.append(button);
-        }
+        grouped(
+          visible.filter((s) => !s.archived),
+          list,
+          "active:",
+        );
         if (!visible.length)
           list.append(
             elem(
@@ -1978,16 +2357,23 @@
       }
       async function loadSessions(more = false) {
         const epoch = connection;
-        const data = await api(
-          "/api/sessions?limit=100" + (more ? "&before=" + sessionCursor : ""),
-        );
-        if (epoch !== connection || !connected) return;
-        sessions = more
-          ? [...sessions, ...(data.sessions || [])]
-          : data.sessions || [];
-        sessionCursor = data.next_before || 0;
+        const loaded = [];
+        let cursor = 0;
+        do {
+          const data = await api(
+            "/api/sessions?limit=500" + (cursor ? "&before=" + cursor : ""),
+          );
+          if (epoch !== connection || !connected) return;
+          loaded.push(...(data.sessions || []));
+          if (data.next_before && data.next_before === cursor)
+            throw Error("会话分页未向前推进");
+          cursor = data.next_before || 0;
+        } while (cursor);
+        sessions = loaded;
+        sessionCursor = 0;
         renderSessions();
       }
+
       async function establish(event) {
         event?.preventDefault();
         const value = $("token").value.trim();
@@ -2032,6 +2418,13 @@
               .map((r) => r.name)
               .join("、") || "暂无") +
             "。首次发送任务会验证账号授权。";
+          try {
+            catalog = (await api("/api/models")).catalog || [];
+          } catch {
+            catalog = [];
+          }
+          if (epoch !== connection) return;
+          newModelSettings();
           await loadSessions();
           if (epoch !== connection) return;
           status("已连接。选择会话或创建新任务。");
@@ -2042,7 +2435,15 @@
                 $("version").textContent = h.version || "网关已连接";
             })
             .catch(() => {});
-          if (sessions.length) await selectSession(sessions[0]);
+          let lastSession;
+          try {
+            lastSession = localStorage.getItem("rcgSelected:" + mount);
+          } catch {}
+          if (sessions.some((s) => !s.archived))
+            await selectSession(
+              sessions.find((s) => s.id === lastSession && !s.archived) ||
+                sessions.find((s) => !s.archived),
+            );
           else renderWelcome();
           if (newAfterConnect) {
             newAfterConnect = false;
@@ -2252,6 +2653,21 @@
           ];
           if (turns.length === newest.length)
             historyCursor = history.next_before || 0;
+          if (history.session && !savingSettings) {
+            const changed =
+              selected.model !== history.session.model ||
+              selected.effort !== history.session.effort ||
+              selected.archived !== history.session.archived;
+            selected = history.session;
+            const index = sessions.findIndex((s) => s.id === id);
+            if (index >= 0) sessions[index] = selected;
+            if (changed) {
+              sessionSettings();
+              renderSessions();
+            }
+          }
+          usage = history.usage || null;
+          renderUsage();
           renderHistory();
           renderApprovals(approvals.approvals || []);
           $("more-history").hidden = !historyCursor;
@@ -2272,12 +2688,19 @@
         refreshTimer = setTimeout(() => {
           refreshTimer = null;
           refreshView(epoch);
-        }, 500);
+        }, 1200);
       }
       async function selectSession(session) {
         stopWatch();
         const epoch = selection;
         selected = session;
+        try {
+          localStorage.setItem("rcgSelected:" + mount, session.id);
+        } catch {}
+        reconnectAttempt = 0;
+        usage = null;
+        renderUsage();
+        sessionSettings();
         closeSidebar();
         turns = [];
         historyCursor = 0;
@@ -2292,9 +2715,18 @@
         $("session-info").textContent =
           (session.runtime === "claude" ? "Claude Code" : "Codex") +
           " · " +
-          (session.workspace.split(/[\\/]/).filter(Boolean).pop() ||
-            session.workspace);
-        $("session-info").title = session.workspace;
+          ((session.source_workspace || session.workspace)
+            .split(/[\\/]/)
+            .filter(Boolean)
+            .pop() || session.workspace);
+        $("session-info").title =
+          session.source_workspace &&
+          session.source_workspace !== session.workspace
+            ? "原目录：" +
+              session.source_workspace +
+              "\n执行目录：" +
+              session.workspace
+            : session.workspace;
         $("session-mode").textContent =
           modes[session.mode]?.split(" · ")[0] || session.mode;
         $("session-mode").title = modes[session.mode] || session.mode;
@@ -2307,7 +2739,7 @@
           if (epoch !== selection) return;
           await refreshView(epoch);
           if (epoch === selection)
-            pollTimer = setTimeout(poll, busyTurn ? 2000 : 10000);
+            pollTimer = setTimeout(poll, busyTurn ? 5000 : 15000);
         };
         pollTimer = setTimeout(poll, 2000);
       }
@@ -2315,7 +2747,8 @@
         if (epoch !== selection) return;
         const controller = new AbortController();
         streamController = controller;
-        let after = cursor;
+        let after = cursor,
+          openedAt = Date.now();
         try {
           const response = await fetch(
             mount + "/api/sessions/" + id + "/events/stream?after=" + after,
@@ -2326,6 +2759,7 @@
             },
           );
           if (!response.ok) throw Error("HTTP " + response.status);
+          openedAt = Date.now();
           status("已连接，正在同步会话。");
           const reader = response.body.getReader(),
             decoder = new TextDecoder();
@@ -2361,22 +2795,47 @@
                 preview = (preview + delta).slice(-12000);
                 $("stream-preview").textContent = preview;
               }
-              scheduleRefresh(epoch);
+              if (!event.kind?.includes("delta")) scheduleRefresh(epoch);
             }
           }
         } catch (error) {
           if (epoch === selection && !controller.signal.aborted)
-            status("事件连接中断，正在重连；对话记录仍会同步。", true);
+            status("实时连接暂时中断，正在自动恢复；任务继续执行。");
         } finally {
           controller.abort();
-          if (epoch === selection)
-            streamTimer = setTimeout(() => watch(epoch, id, after), 2000);
+          if (epoch === selection) {
+            reconnectAttempt =
+              Date.now() - openedAt > 20000 ? 0 : reconnectAttempt + 1;
+            const delay =
+              Math.min(15000, 1000 * 2 ** Math.min(reconnectAttempt, 4)) +
+              Math.random() * 300;
+            streamTimer = setTimeout(() => watch(epoch, id, after), delay);
+          }
         }
       }
       $("connect-form").onsubmit = establish;
       $("connection-settings").onclick = openConnection;
       $("new-conversation").onclick = openNewSession;
       $("search").oninput = renderSessions;
+      $("runtime").onchange = newModelSettings;
+      $("model").onchange = () => {
+        $("custom-model-label").hidden = $("model").value !== "__custom__";
+        fillEfforts("effort", $("runtime").value, $("model").value);
+      };
+      $("session-model").onchange = () => {
+        const choice = catalog.find(
+          (m) =>
+            m.runtime === selected.runtime && m.id === $("session-model").value,
+        );
+        saveSettings({
+          model: $("session-model").value,
+          effort: choice?.default_effort || "",
+        });
+      };
+      $("session-effort").onchange = () =>
+        saveSettings({ effort: $("session-effort").value });
+      $("archive-session").onclick = () =>
+        saveSettings({ archived: !selected.archived });
       $("events-toggle").onclick = () => $("events-dialog").showModal();
       $("connection-origin").textContent = location.host;
       $("show-token").onclick = () => {
@@ -2492,7 +2951,11 @@
               runtime: $("runtime").value,
               workspace: $("workspace").value,
               mode: $("mode").value,
-              model: $("model").value.trim(),
+              model:
+                $("model").value === "__custom__"
+                  ? $("custom-model").value.trim()
+                  : $("model").value,
+              effort: $("effort").value,
             }),
           });
           if (epoch !== connection || !connected) return;
@@ -2577,6 +3040,12 @@
         }
       };
       window.addEventListener("pagehide", stopWatch);
+      window.addEventListener("pageshow", (event) => {
+        if (event.persisted && connected && selected) selectSession(selected);
+      });
+      window.addEventListener("online", () => {
+        if (connected && selected) selectSession(selected);
+      });
       matchMedia("(max-width: 760px)").addEventListener("change", (event) => {
         closeSidebar();
       });

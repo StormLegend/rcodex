@@ -55,6 +55,11 @@ func main() {
 		os.Exit(2)
 	}
 	log := slog.New(slog.NewJSONHandler(os.Stderr, nil))
+	if n, err := s.BackfillCodexMetadata(c.CodexHome); err != nil {
+		log.Warn("imported session metadata unavailable", "error", err)
+	} else if n > 0 {
+		log.Info("restored imported session metadata", "sessions", n)
+	}
 	eng := engine.New(s, c, log)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
