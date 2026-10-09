@@ -66,4 +66,43 @@ this fix does not claim to remove every possible upstream failure.
   Claude execution remains an existing acceptance gap; no successful live
   Claude call is claimed here. A 70-second stream check is not a multi-day soak.
 
-Release/deployment evidence is appended after publication and live verification.
+## Published release and Mac installation
+
+- Source commit: `e6e6e002e0629c1a813037dda101478e06a6997d`.
+- [Linux/macOS/browser CI](https://github.com/StormLegend/rcodex/actions/runs/37881015384)
+  and [release validation/build](https://github.com/StormLegend/rcodex/actions/runs/37881045847)
+  both passed.
+- [v0.2.12-rc.1](https://github.com/StormLegend/rcodex/releases/tag/v0.2.12-rc.1)
+  publishes all six programs for Linux amd64/arm64, macOS amd64/arm64 and Windows
+  amd64, plus `SHA256SUMS`.
+- The Mac arm64 archive SHA256 is
+  `2414818c25611c2547a05f277abe0d9b81299ef2f6523898dd738dbe47cfc4cf`;
+  its installed `rcg` binary SHA256 is
+  `d05a3f81b5a1f6b8eaad7e9eef70b2a31545ea603bdf3bc589b062eb3d5e5540`.
+  Both the published asset digest and the downloaded manifest were checked.
+- Installed under `~/Applications/rcodex-go-preview/releases/v0.2.12-rc.1-github`.
+  The atomic symlink upgrade retained `v0.2.11-rc.1-github` for rollback. A backup
+  taken with the preceding binary before schema initialization is at
+  `backups/pre-v0.2.12-rc.1-github.db`.
+- Published-binary acceptance on `18892` passed a real Codex turn, usage display,
+  archive/restore, reload, mobile layout and the public browser console. The
+  temporary gateway test session was deleted after verification; the original
+  478 sessions remain, with 151 archives and 96 imported directories.
+- Loopback SSE on the published binary stayed open for 70 seconds and seven
+  heartbeats with zero unexpected disconnects. The authenticated public browser
+  stream through `myrcodex.19920621.xyz` subsequently passed 70.7 seconds and
+  seven heartbeats, also with no unexpected disconnects. Database `quick_check`
+  is `ok`.
+- Preview launchd PID after upgrade: `4761`. Other Go ports `18890` and `18891`
+  retained PIDs `40441` and `60233`. The Mac Cloudflare connector retained PID
+  `87917`. Linux legacy Node/FRP/Cloudflare PIDs remained
+  `2935418` / `4182386` / `2503614` respectively.
+- The disposable `18893` acceptance process was stopped after testing. Its
+  copied database never ran schedules or outbound deliveries.
+
+During verification, Cloudflare rejected Python urllib's default user agent
+with edge error `1010` (HTTP 403). Public acceptance uses a real browser; no
+zone security policy was changed for this console update. A first public browser
+navigation returned Chromium `ERR_NETWORK_CHANGED` on the test client; retrying
+navigation succeeded before the 70.7-second stream observation. This is separate
+from the fixed server write deadline and is not counted as a clean first attempt.
