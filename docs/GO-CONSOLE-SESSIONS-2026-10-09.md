@@ -106,3 +106,23 @@ zone security policy was changed for this console update. A first public browser
 navigation returned Chromium `ERR_NETWORK_CHANGED` on the test client; retrying
 navigation succeeded before the 70.7-second stream observation. This is separate
 from the fixed server write deadline and is not counted as a clean first attempt.
+
+## Goal timeout follow-up · 2026-10-09
+
+The original `turn_seconds: 300` in the Go preview was a generic defensive
+ceiling, separate from the SSE timeout. It was too restrictive for Goal-style
+work. `v0.2.12-rc.2` changes `turn_seconds: 0` to mean no artificial execution
+deadline and keeps positive values as an explicit operator-selected hard cap.
+The engine still ends work on explicit cancel, runtime failure, parent shutdown,
+or a configured positive deadline. Negative values are rejected.
+
+This matches the legacy Node gateway's behavior: its HTTP server leaves the
+response timeout unset, sends an SSE ping every 25 seconds, and does not wrap a
+whole turn in a wall-clock deadline. Its 120-second app-server request timer
+only guards JSON-RPC control requests such as `thread/start` and `turn/start`;
+the turn continues through notifications after a turn ID is returned. Human
+approval waits use a separate 600-second timer. The old gateway therefore does
+not treat a long Goal as an unanswered HTTP request.
+
+The published Go service now uses `turn_seconds: 0` on the independent Mac
+preview. The legacy Node service and all other services were left unchanged.

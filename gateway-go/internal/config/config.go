@@ -69,7 +69,7 @@ type Config struct {
 }
 
 func Load(file string) (Config, error) {
-	c := Config{Listen: "127.0.0.1:8790", DataDir: "./data", Workers: 4, QueueLimit: 100, TurnSeconds: 600, CodexCommand: "codex", ClaudeCommand: "claude"}
+	c := Config{Listen: "127.0.0.1:8790", DataDir: "./data", Workers: 4, QueueLimit: 100, TurnSeconds: 0, CodexCommand: "codex", ClaudeCommand: "claude"}
 	b, err := os.ReadFile(file)
 	if err != nil {
 		return c, err
@@ -91,7 +91,7 @@ func Load(file string) (Config, error) {
 	if err = dec.Decode(&c); err != nil {
 		return c, err
 	}
-	if c.Workers < 1 || c.Workers > 64 || c.QueueLimit < 1 || c.TurnSeconds < 1 {
+	if c.Workers < 1 || c.Workers > 64 || c.QueueLimit < 1 || c.TurnSeconds < 0 {
 		return c, errors.New("invalid capacity configuration")
 	}
 	if c.RateLimitPerMinute == 0 {

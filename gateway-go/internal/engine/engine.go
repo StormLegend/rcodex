@@ -57,8 +57,19 @@ func (e *Engine) loop(ctx context.Context) {
 		e.run(ctx, t)
 	}
 }
+func (e *Engine) executionContext(parent context.Context) (context.Context, context.CancelFunc) {
+	// A zero timeout means an interactive turn has no artificial wall-clock
+	// deadline. This matches the legacy gateway: turn/start is a short control
+	// request, while the actual Goal runs until completion, explicit cancel,
+	// runtime failure, or gateway shutdown. Operators can still set a positive
+	// value for a deployment-specific hard ceiling.
+	if e.Config.TurnSeconds > 0 {
+		return context.WithTimeout(parent, time.Duration(e.Config.TurnSeconds)*time.Second)
+	}
+	return context.WithCancel(parent)
+}
 func (e *Engine) run(parent context.Context, t store.Turn) {
-	ctx, cancel := context.WithTimeout(parent, time.Duration(e.Config.TurnSeconds)*time.Second)
+	ctx, cancel := e.executionContext(parent)
 	defer cancel()
 	e.activeMu.Lock()
 	e.active[t.ID] = cancel

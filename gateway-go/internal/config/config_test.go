@@ -38,7 +38,7 @@ func TestLoadDefaultsAndProviderInventory(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	if c.RateLimitPerMinute != 120 || c.ReadRateLimitPerMinute != 600 || !c.Providers["test"].Enabled {
+	if c.TurnSeconds != 0 || c.RateLimitPerMinute != 120 || c.ReadRateLimitPerMinute != 600 || !c.Providers["test"].Enabled {
 		t.Fatalf("config=%+v", c)
 	}
 }
@@ -60,5 +60,15 @@ func TestChannelAPIBaseURLIsRestricted(t *testing.T) {
 	}
 	if _, e := Load(f); e == nil {
 		t.Fatal("public HTTP API base accepted")
+	}
+}
+
+func TestLoadRejectsNegativeTurnSeconds(t *testing.T) {
+	d := t.TempDir()
+	tok := strings.Repeat("x", 40)
+	f := filepath.Join(d, "gateway.json")
+	os.WriteFile(f, []byte(`{"listen":"127.0.0.1:8790","data_dir":"`+d+`/data","token":"`+tok+`","roots":["`+d+`"],"turn_seconds":-1}`), 0600)
+	if _, e := Load(f); e == nil {
+		t.Fatal("negative turn_seconds accepted")
 	}
 }

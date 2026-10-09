@@ -36,6 +36,17 @@ func waitTurn(t *testing.T, s *store.Store, id, state string) store.Turn {
 	return store.Turn{}
 }
 
+func TestZeroTurnSecondsHasNoArtificialDeadline(t *testing.T) {
+	e := New(nil, config.Config{TurnSeconds: 0}, slog.Default())
+	ctx, cancel := e.executionContext(context.Background())
+	defer cancel()
+	select {
+	case <-ctx.Done():
+		t.Fatal("zero turn_seconds unexpectedly cancelled the Goal")
+	case <-time.After(40 * time.Millisecond):
+	}
+}
+
 func TestNativeIdentityMustPersistBeforeRuntimeExecution(t *testing.T) {
 	root := t.TempDir()
 	s, err := store.Open(filepath.Join(root, "gateway.db"))
